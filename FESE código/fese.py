@@ -3,12 +3,18 @@ import datetime as dt
 import locale
 import shutil
 import json
+import re
 
 import pandas as pd
 import openpyxl
 import numpy as np
 import pyreadr
 from unidecode import unidecode
+
+BASE_DIR = Path(__file__).resolve().parent
+CARPETA_INSUMOS = BASE_DIR / "insumos"
+CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
+
 
 # REVISAR BIEN PUEBLA Y SINALOA que cuadren el total con loq eu mandan en el excel
 # Hacer validación de que sean todos números enteros
@@ -83,8 +89,8 @@ columnas_long = [
 
 
 def proceso_fese():
-    fese = cargar_y_limpiar(f"fese{anio_mes_anterior}-{mes_anterior}.rds")
-    insumos = obtener_insumos()
+    fese = cargar_y_limpiar(BASE_DIR / f"fese{anio_mes_anterior}-{mes_anterior}.rds")
+    insumos = obtener_insumos(CARPETA_INSUMOS)
     resultados, validaciones = leer_insumos(fese, insumos)
     generar_salidas(fese, columnas_long, resultados, validaciones)
 
@@ -437,22 +443,60 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
 
     wide = wide.sort_values(by=["Año", "Código"], ascending=[True, True])
 
-    wide.to_excel(
-        f"Rep_anual{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx", index=False
-    )
+    archivo_excel = BASE_DIR / f"Rep_anual{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
+    wide.to_excel(archivo_excel, index=False)
+
+    salida_analitica = BASE_DIR / "fese.rds"
 
     if salida_analitica.is_file():
-        # Antes de sobreescribir fese.rds generamos un backup
-        shutil.copy2(
-            "fese.rds", f"fese.rds.bak{dt.datetime.now().strftime("%Y%m%d-%H%M%S")}"
-        )
+        shutil.copy2(salida_analitica, BASE_DIR / f"fese.rds.bak{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}")
+
     salida.estado = salida.estado.str.title()
     salida.estado = salida.estado.apply(unidecode)
     salida.estado = salida.estado.replace(mapa_estados)
-    pyreadr.write_rds(f"fese{anio_mes_pasado}-{mes_pasado}.rds", salida)
 
-    with open("validaciones.json", "w") as f:
+    archivo_rds = BASE_DIR / f"fese{anio_mes_pasado}-{mes_pasado}.rds"
+    pyreadr.write_rds(str(archivo_rds), salida)
+
+    with open(BASE_DIR / "validaciones.json", "w") as f:
         json.dump(validaciones, f)
+
+    copiar_resultados_y_limpiar(archivo_excel, archivo_rds)
+
+
+def copiar_resultados_y_limpiar(archivo_excel, archivo_rds):
+    CARPETA_DESTINO.mkdir(parents=True, exist_ok=True)
+
+    carpeta_formatos = CARPETA_DESTINO / f"Formatos {nombre_mes_pasado} {anio_mes_pasado}"
+
+    if carpeta_formatos.exists():
+        shutil.rmtree(carpeta_formatos)
+
+    shutil.copytree(CARPETA_INSUMOS, carpeta_formatos)
+    shutil.copy2(archivo_excel, CARPETA_DESTINO / archivo_excel.name)
+    shutil.copy2(archivo_rds, CARPETA_DESTINO / archivo_rds.name)
+
+    # Vaciamos la carpeta original de insumos
+    for item in CARPETA_INSUMOS.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+
+    # Conservamos solamente el mes procesado y el mes anterior
+    meses_conservar = {(anio_mes_pasado, mes_pasado), (anio_mes_anterior, mes_anterior)}
+    patron_rds = re.compile(r"^fese(\d{4})-(\d{1,2})\.rds$", re.IGNORECASE)
+    patron_excel = re.compile(r"^Rep_anual(\d{4})-(\d{1,2})\.xlsx$", re.IGNORECASE)
+
+    for archivo in BASE_DIR.iterdir():
+        coincidencia = patron_rds.match(archivo.name) or patron_excel.match(archivo.name)
+
+        if coincidencia:
+            anio_archivo = int(coincidencia.group(1))
+            mes_archivo = int(coincidencia.group(2))
+
+            if (anio_archivo, mes_archivo) not in meses_conservar:
+                archivo.unlink()
 
 
 if __name__ == "__main__":
