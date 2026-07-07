@@ -1,0 +1,93 @@
+[
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "C4 Gomez Palacio",
+    "entidad": "Durango",
+    "archivo": "insumos\\durango.xlsm",
+    "hoja": "C02"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "Sub C4 Lazaro Cardenas",
+    "entidad": "Michoac\u00e1n",
+    "archivo": "insumos\\michoacan.xlsx",
+    "hoja": "C04"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "Sub C4 Zitacuaro",
+    "entidad": "Michoac\u00e1n",
+    "archivo": "insumos\\michoacan.xlsx",
+    "hoja": "C05"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "Sub C4 Patzcuaro",
+    "entidad": "Michoac\u00e1n",
+    "archivo": "insumos\\michoacan.xlsx",
+    "hoja": "C06"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "Izucar De Matamoros",
+    "entidad": "Puebla",
+    "archivo": "insumos\\puebla.xlsx",
+    "hoja": "C04"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "El Marqu\u00e9s",
+    "entidad": "Quer\u00e9taro",
+    "archivo": "insumos\\queretaro.xlsx",
+    "hoja": "C07"
+  },
+  {
+    "clave_error": "suma_total_cero",
+    "centro": "San Joaqu\u00edn",
+    "entidad": "Quer\u00e9taro",
+    "archivo": "insumos\\queretaro.xlsx",
+    "hoja": "C016"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "Subcentro C4 Cancun",
+    "entidad": "Quintana Roo",
+    "archivo": "insumos\\quintanaroo.xlsx",
+    "hoja": "C02"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "C4 Obregon",
+    "entidad": "Sonora",
+    "archivo": "insumos\\sonora.xlsx",
+    "hoja": "C02"
+  },
+  {
+    "clave_error": "suma_total_cero",
+    "centro": "Matamoros",
+    "entidad": "Tamaulipas",
+    "archivo": "insumos\\tamaulipas.xlsx",
+    "hoja": "C03"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "C4 Martinez de la torre",
+    "entidad": "Veracruz",
+    "archivo": "insumos\\veracruz.xlsx",
+    "hoja": "C04"
+  },
+  {
+    "clave_error": "centro_no_existe",
+    "centro": "C4 Valparaiso",
+    "entidad": "Zacatecas",
+    "archivo": "insumos\\zacatecas.xlsx",
+    "hoja": "C07"
+  },
+  {
+    "clave_error": "suma_total_cero",
+    "centro": "C4 Valparaiso",
+    "entidad": "Zacatecas",
+    "archivo": "insumos\\zacatecas.xlsx",
+    "hoja": "C07"
+  }
+]

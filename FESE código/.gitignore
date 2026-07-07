@@ -1,0 +1,15 @@
+# Datos pesados
+*.rds
+*.rds.bak*
+fese.csv
+
+# Salidas generadas
+Rep_anual*.xlsx
+validaciones.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Temporales de Excel
+~$*
