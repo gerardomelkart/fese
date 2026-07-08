@@ -12,6 +12,7 @@ import numpy as np
 import pyreadr
 from unidecode import unidecode
 from time import perf_counter
+import os
 
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_INSUMOS = BASE_DIR / "insumos"
@@ -347,13 +348,12 @@ def generar_formato_cniedt(salida):
     totales = datos.groupby("clave_entidad")["total"].sum().to_dict()
 
     archivo_salida = CARPETA_DESTINO / f"Formato CNIEDT {anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
+    archivo_temporal = CARPETA_DESTINO / f"~CNIEDT_TEMP_{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
 
-    if archivo_salida.exists():
-        archivo_salida.unlink()
+    if archivo_temporal.exists():
+        archivo_temporal.unlink()
 
-    shutil.copy2(PLANTILLA_CNIEDT, archivo_salida)
-
-    shutil.copy2(PLANTILLA_CNIEDT, archivo_salida)
+    shutil.copy2(PLANTILLA_CNIEDT, archivo_temporal)
 
     excel = None
     libro = None
@@ -363,7 +363,7 @@ def generar_formato_cniedt(salida):
         excel.Visible = False
         excel.DisplayAlerts = False
 
-        libro = excel.Workbooks.Open(str(archivo_salida))
+        libro = excel.Workbooks.Open(str(archivo_temporal))
         hoja = libro.Worksheets("Llamadas procedentes 911")
 
         tabla = None
@@ -427,6 +427,11 @@ def generar_formato_cniedt(salida):
 
         if excel is not None:
             excel.Quit()
+
+    try:
+        os.replace(archivo_temporal, archivo_salida)
+    except PermissionError as e:
+        raise PermissionError(f"No se pudo reemplazar el CNIEDT porque el archivo destino probablemente está abierto o bloqueado: {archivo_salida}") from e
 
     return archivo_salida
 
