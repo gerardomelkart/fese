@@ -4,6 +4,7 @@ import locale
 import shutil
 import json
 import re
+import win32com.client as win32
 
 import pandas as pd
 import openpyxl
@@ -14,6 +15,7 @@ from unidecode import unidecode
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_INSUMOS = BASE_DIR / "insumos"
 CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
+PLANTILLA_CNIEDT = CARPETA_DESTINO / "Formato CNIEDT plantilla.xlsx"
 
 
 # REVISAR BIEN PUEBLA Y SINALOA que cuadren el total con loq eu mandan en el excel
@@ -326,6 +328,109 @@ def leer_insumos(fese, insumos):
                 resultados.append(datos_centro)
     return resultados, validaciones
 
+def normalizar_clave_entidad(valor):
+    clave = unidecode(str(valor)).strip().upper()
+    equivalencias = {
+        "COAHUILA DE ZARAGOZA": "COAHUILA",
+        "ESTADO DE MEXICO": "MEXICO",
+        "MICHOACAN DE OCAMPO": "MICHOACAN",
+        "VERACRUZ DE IGNACIO DE LA LLAVE": "VERACRUZ",
+    }
+    return equivalencias.get(clave, clave)
+
+def generar_formato_cniedt(salida):
+    if not PLANTILLA_CNIEDT.is_file():
+        raise FileNotFoundError(f"No existe la plantilla CNIEDT: {PLANTILLA_CNIEDT}")
+
+    datos = salida[(salida["ao"] == anio_mes_pasado) & (salida["mes"] == mes_pasado) & (salida["procedencia"] == "Procedentes")].copy()
+
+    if datos.empty:
+        raise ValueError(f"No hay datos procedentes para {nombre_mes_pasado} {anio_mes_pasado}.")
+
+    datos["clave_entidad"] = datos["estado"].apply(normalizar_clave_entidad)
+    totales = datos.groupby("clave_entidad")["total"].sum().to_dict()
+
+    archivo_salida = CARPETA_DESTINO / f"Formato CNIEDT {anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
+
+    if archivo_salida.exists():
+        raise FileExistsError(f"Ya existe el formato CNIEDT generado: {archivo_salida}")
+
+    shutil.copy2(PLANTILLA_CNIEDT, archivo_salida)
+
+    excel = None
+    libro = None
+
+    try:
+        excel = win32.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        libro = excel.Workbooks.Open(str(archivo_salida))
+        hoja = libro.Worksheets("Llamadas procedentes 911")
+
+        tabla = None
+
+        for i in range(1, hoja.ListObjects.Count + 1):
+            candidata = hoja.ListObjects(i)
+            encabezados = [str(candidata.HeaderRowRange.Cells(1, j).Value).strip() for j in range(1, candidata.ListColumns.Count + 1)]
+
+            if {"Entidad", "Mes", "Número", "TOTAL"}.issubset(set(encabezados)):
+                tabla = candidata
+                break
+
+        if tabla is None:
+            raise ValueError("No se encontró la tabla Entidad/Mes/Número/TOTAL en la pestaña 'Llamadas procedentes 911'.")
+
+        encabezados = [str(tabla.HeaderRowRange.Cells(1, j).Value).strip() for j in range(1, tabla.ListColumns.Count + 1)]
+        idx_entidad = encabezados.index("Entidad") + 1
+        idx_mes = encabezados.index("Mes") + 1
+        idx_numero = encabezados.index("Número") + 1
+        idx_total = encabezados.index("TOTAL") + 1
+
+        filas_objetivo = []
+        entidades_formato = set()
+
+        for fila in range(1, tabla.DataBodyRange.Rows.Count + 1):
+            entidad = tabla.DataBodyRange.Cells(fila, idx_entidad).Value
+            mes = tabla.DataBodyRange.Cells(fila, idx_mes).Value
+            numero = tabla.DataBodyRange.Cells(fila, idx_numero).Value
+
+            try:
+                es_911 = int(float(numero)) == 911
+            except (TypeError, ValueError):
+                es_911 = False
+
+            if str(mes).strip().lower() == nombre_mes_pasado.lower() and es_911:
+                clave = normalizar_clave_entidad(entidad)
+                filas_objetivo.append((fila, clave, entidad))
+                entidades_formato.add(clave)
+
+        if len(filas_objetivo) != 32:
+            raise ValueError(f"Se esperaban 32 entidades para {nombre_mes_pasado} y 911, pero se encontraron {len(filas_objetivo)}.")
+
+        faltantes = entidades_formato - set(totales.keys())
+        extras = set(totales.keys()) - entidades_formato
+
+        if faltantes:
+            raise ValueError(f"Faltan entidades en los datos FESE: {sorted(faltantes)}")
+
+        if extras:
+            raise ValueError(f"Hay entidades FESE que no coinciden con el formato CNIEDT: {sorted(extras)}")
+
+        for fila, clave, entidad in filas_objetivo:
+            tabla.DataBodyRange.Cells(fila, idx_total).Value = float(totales[clave])
+
+        excel.CalculateFull()
+        libro.Save()
+
+    finally:
+        if libro is not None:
+            libro.Close(SaveChanges=True)
+
+        if excel is not None:
+            excel.Quit()
+
+    return archivo_salida
 
 def generar_salidas(fese, columnas_long, resultados, validaciones):
     resultados = [fese[columnas_long]] + resultados
@@ -435,10 +540,10 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
     with open(BASE_DIR / "validaciones.json", "w") as f:
         json.dump(validaciones, f)
 
-    copiar_resultados_y_limpiar(archivo_excel, archivo_rds)
+    copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida)
 
 
-def copiar_resultados_y_limpiar(archivo_excel, archivo_rds):
+def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
     CARPETA_DESTINO.mkdir(parents=True, exist_ok=True)
     carpeta_formatos = CARPETA_DESTINO / f"Formatos {nombre_mes_pasado} {anio_mes_pasado}"
 
@@ -451,11 +556,14 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds):
     shutil.copy2(archivo_excel, destino_excel)
     shutil.copy2(archivo_rds, destino_rds)
 
-    if not destino_excel.is_file() or not destino_rds.is_file() or not carpeta_formatos.is_dir():
-        raise RuntimeError("No se completó correctamente la copia a OneDrive. No se limpiarán los archivos originales.")
+    archivo_cniedt = generar_formato_cniedt(salida)
+
+    if not destino_excel.is_file() or not destino_rds.is_file() or not carpeta_formatos.is_dir() or not archivo_cniedt.is_file():
+        raise RuntimeError("No se completó correctamente la generación y copia de resultados. No se limpiarán los archivos originales.")
 
     print(f"Excel copiado a: {destino_excel}")
     print(f"RDS copiado a: {destino_rds}")
+    print(f"CNIEDT generado en: {archivo_cniedt}")
     print(f"Formatos copiados a: {carpeta_formatos}")
 
     for item in CARPETA_INSUMOS.iterdir():
