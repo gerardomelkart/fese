@@ -5,6 +5,8 @@ import shutil
 import json
 import re
 import os
+import subprocess
+import sys
 import win32com.client as win32
 
 import pandas as pd
@@ -153,6 +155,22 @@ def guardar_cache_historico(fese, nombre_archivo):
     print(f"⚡ Cache histórico actualizado en {perf_counter() - inicio:.1f} s: {archivo_cache}")
 
 
+def registrar_cache_desde_pickle(archivo_pickle, nombre_archivo):
+    inicio = perf_counter()
+    CARPETA_CACHE.mkdir(parents=True, exist_ok=True)
+    archivo_cache, archivo_meta = rutas_cache_historico(nombre_archivo)
+    temporal_meta = archivo_meta.with_name(f"~TEMP_{archivo_meta.name}")
+
+    if temporal_meta.exists():
+        temporal_meta.unlink()
+
+    os.replace(archivo_pickle, archivo_cache)
+    with open(temporal_meta, "w", encoding="utf-8") as f:
+        json.dump(huella_archivo(nombre_archivo), f)
+    os.replace(temporal_meta, archivo_meta)
+    print(f"⚡ Cache histórico registrado en {perf_counter() - inicio:.1f} s: {archivo_cache}")
+
+
 def limpiar_caches_antiguos():
     if not CARPETA_CACHE.is_dir():
         return
@@ -170,6 +188,7 @@ def cargar_y_limpiar(nombre_archivo="df_fese.rds"):
         inicio = perf_counter()
         try:
             fese = pd.read_pickle(archivo_cache)
+            fese = normalizar_historico(fese)
             print(f"⚡ Cache histórico cargado en {perf_counter() - inicio:.1f} s: {archivo_cache}")
             return fese
         except Exception as e:
@@ -387,12 +406,67 @@ def generar_formato_cniedt(salida):
     return archivo_salida
 
 
+def preparar_fuente_rds(salida, archivo_rds):
+    inicio = perf_counter()
+    CARPETA_CACHE.mkdir(parents=True, exist_ok=True)
+    archivo_pickle = CARPETA_CACHE / f"~RDS_SOURCE_{archivo_rds.stem}.pkl"
+
+    if archivo_pickle.exists():
+        archivo_pickle.unlink()
+
+    salida.to_pickle(archivo_pickle)
+    print(f"⏱ Preparación fuente RDS/cache: {perf_counter() - inicio:.1f} s")
+    return archivo_pickle
+
+
+def iniciar_escritura_rds_paralela(archivo_pickle, archivo_rds):
+    archivo_temporal = archivo_rds.with_name(f"~TEMP_{archivo_rds.name}")
+    if archivo_temporal.exists():
+        archivo_temporal.unlink()
+
+    codigo_worker = "import sys,pandas as pd,pyreadr; df=pd.read_pickle(sys.argv[1]); pyreadr.write_rds(sys.argv[2],df)"
+    inicio = perf_counter()
+    proceso = subprocess.Popen([sys.executable, "-c", codigo_worker, str(archivo_pickle), str(archivo_temporal)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print("🚀 Escritura RDS iniciada en paralelo con Excel anual")
+    return proceso, archivo_temporal, inicio
+
+
+def finalizar_escritura_rds_paralela(proceso, archivo_temporal, archivo_rds, inicio):
+    stdout, stderr = proceso.communicate()
+
+    if proceso.returncode != 0:
+        if archivo_temporal.exists():
+            archivo_temporal.unlink()
+        detalle = stderr.strip() or stdout.strip() or f"código de salida {proceso.returncode}"
+        raise RuntimeError(f"Falló la escritura paralela del RDS: {detalle}")
+
+    if not archivo_temporal.is_file():
+        raise RuntimeError(f"La escritura paralela terminó sin generar el RDS temporal: {archivo_temporal}")
+
+    os.replace(archivo_temporal, archivo_rds)
+    print(f"⏱ Escritura RDS paralela total: {perf_counter() - inicio:.1f} s")
+
+
+def cancelar_escritura_rds(proceso, archivo_temporal):
+    if proceso is not None and proceso.poll() is None:
+        proceso.terminate()
+        try:
+            proceso.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proceso.kill()
+            proceso.wait()
+
+    if archivo_temporal is not None and archivo_temporal.exists():
+        archivo_temporal.unlink()
+
+
 def generar_salidas(fese, columnas_long, resultados, validaciones):
     inicio_total = perf_counter()
 
     inicio = perf_counter()
     resultados = [fese[columnas_long]] + resultados
     salida = pd.concat(resultados, ignore_index=True)
+    del resultados
     print(f"⏱ Concatenación histórica: {perf_counter() - inicio:.1f} s")
 
     mapeo_centro = {
@@ -427,35 +501,49 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
     wide = wide.sort_values(by=["Año", "Código"], ascending=[True, True])
     archivo_excel = BASE_DIR / f"Rep_anual{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
 
-    inicio = perf_counter()
-    wide.to_excel(archivo_excel, index=False)
-    print(f"⏱ Escritura Excel anual: {perf_counter() - inicio:.1f} s")
-
     salida.estado = salida.estado.str.title()
     salida.estado = salida.estado.apply(unidecode)
     salida.estado = salida.estado.replace(mapa_estados)
 
     archivo_rds = BASE_DIR / f"fese{anio_mes_pasado}-{mes_pasado}.rds"
-    inicio = perf_counter()
-    pyreadr.write_rds(str(archivo_rds), salida)
-    print(f"⏱ Escritura RDS: {perf_counter() - inicio:.1f} s")
+    archivo_pickle = preparar_fuente_rds(salida, archivo_rds)
+    proceso_rds = None
+    temporal_rds = None
 
-    inicio = perf_counter()
-    salida_cache = normalizar_historico(salida.copy(deep=False))
     try:
-        guardar_cache_historico(salida_cache, archivo_rds)
-        limpiar_caches_antiguos()
-    except Exception as e:
-        print(f"⚠ No se pudo actualizar el cache del nuevo histórico; el proceso continúa: {e}")
-    print(f"⏱ Actualización cache siguiente mes: {perf_counter() - inicio:.1f} s")
+        archivo_cniedt = generar_formato_cniedt(salida)
+        del salida
 
-    with open(BASE_DIR / "validaciones.json", "w") as f:
-        json.dump(validaciones, f)
+        proceso_rds, temporal_rds, inicio_rds = iniciar_escritura_rds_paralela(archivo_pickle, archivo_rds)
 
-    inicio = perf_counter()
-    copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida)
-    print(f"⏱ Copias y CNIEDT: {perf_counter() - inicio:.1f} s")
-    print(f"⏱ generar_salidas TOTAL: {perf_counter() - inicio_total:.1f} s")
+        inicio = perf_counter()
+        wide.to_excel(archivo_excel, index=False)
+        print(f"⏱ Escritura Excel anual: {perf_counter() - inicio:.1f} s")
+
+        with open(BASE_DIR / "validaciones.json", "w") as f:
+            json.dump(validaciones, f)
+
+        finalizar_escritura_rds_paralela(proceso_rds, temporal_rds, archivo_rds, inicio_rds)
+        proceso_rds = None
+        temporal_rds = None
+
+        try:
+            registrar_cache_desde_pickle(archivo_pickle, archivo_rds)
+            limpiar_caches_antiguos()
+        except Exception as e:
+            print(f"⚠ No se pudo registrar el cache del nuevo histórico; el proceso continúa: {e}")
+            if archivo_pickle.exists():
+                archivo_pickle.unlink()
+
+        inicio = perf_counter()
+        copiar_resultados_y_limpiar(archivo_excel, archivo_rds, archivo_cniedt)
+        print(f"⏱ Copias finales: {perf_counter() - inicio:.1f} s")
+        print(f"⏱ generar_salidas TOTAL: {perf_counter() - inicio_total:.1f} s")
+    except Exception:
+        cancelar_escritura_rds(proceso_rds, temporal_rds)
+        if archivo_pickle.exists():
+            archivo_pickle.unlink()
+        raise
 
 
 def copiar_reemplazo_seguro(origen, destino):
@@ -474,7 +562,7 @@ def copiar_reemplazo_seguro(origen, destino):
     print(f"⏱ Copia {destino.name}: {perf_counter() - inicio:.1f} s")
 
 
-def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
+def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, archivo_cniedt):
     CARPETA_DESTINO.mkdir(parents=True, exist_ok=True)
     carpeta_formatos = CARPETA_DESTINO / f"Formatos {nombre_mes_pasado} {anio_mes_pasado}"
 
@@ -488,7 +576,6 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
     destino_rds = CARPETA_DESTINO / archivo_rds.name
     copiar_reemplazo_seguro(archivo_excel, destino_excel)
     copiar_reemplazo_seguro(archivo_rds, destino_rds)
-    archivo_cniedt = generar_formato_cniedt(salida)
 
     if not destino_excel.is_file() or not destino_rds.is_file() or not carpeta_formatos.is_dir() or not archivo_cniedt.is_file():
         raise RuntimeError("No se completó correctamente la generación y copia de resultados. No se limpiarán los archivos originales.")
