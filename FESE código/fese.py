@@ -145,207 +145,182 @@ def leer_insumos(fese, insumos):
 
     codigos = set(fese["codigo"].unique())
     centros_historicos = set(fese["centro"].dropna().unique())
-    codigo_incidente = fese.groupby("codigo")["incidente"].agg(lambda x: x.unique()[0]).to_dict()
+    codigo_incidente = fese.groupby("codigo")["incidente"].first().to_dict()
 
-    estado_region_grupos = fese.groupby("region")["estado"].agg(lambda x: list(x.unique())).to_dict()
+    estado_region_grupos = fese.groupby("region")["estado"].unique().to_dict()
     estado_a_region = {estado: region for region, estados in estado_region_grupos.items() for estado in estados}
 
-    codigo_tipo_grupos = fese.groupby("tipo")["codigo"].agg(lambda x: list(x.unique())).to_dict()
+    codigo_tipo_grupos = fese.groupby("tipo")["codigo"].unique().to_dict()
     codigo_a_tipo = {codigo: tipo for tipo, codigos_tipo in codigo_tipo_grupos.items() for codigo in codigos_tipo}
 
     print(f"⏱ Catálogos preparados en {perf_counter() - inicio_catalogos:.1f} s")
 
+    codigos_improcedentes = {70101, 70102, 70103, 70104, 70105, 70106, 70107, 70108}
+
     for insumo in insumos:
-        # Abrimos el archivo excel como un archivo (NO UN DATAFRAME) para leer metadatos sobre las hojas
+        inicio_archivo = perf_counter()
+        print(f"\nAbriendo archivo: {insumo.name}")
+
         with pd.ExcelFile(insumo) as xlsx:
-            # Obtenemos los nombres de las hojas que empiezan con C0 (estas hojas contienen los datos)
-            hojas_con_datos = [
-                hoja for hoja in xlsx.sheet_names if hoja.startswith("C")
-            ]
-            # Iteramos sobre las hojas
-            for insumo in insumos:
-                inicio_archivo = perf_counter()
-                print(f"\nAbriendo archivo: {insumo.name}")
+            hojas_con_datos = [hoja for hoja in xlsx.sheet_names if hoja.startswith("C")]
+            datos_hojas = pd.read_excel(xlsx, sheet_name=hojas_con_datos, usecols="B:D", skiprows=18)
+            workbook = openpyxl.load_workbook(insumo, data_only=True, read_only=True)
 
-                with pd.ExcelFile(insumo) as xlsx:
-                    hojas_con_datos = [hoja for hoja in xlsx.sheet_names if hoja.startswith("C")]
-                    datos_hojas = pd.read_excel(xlsx, sheet_name=hojas_con_datos, usecols="B:D", skiprows=18)
-                    workbook = openpyxl.load_workbook(insumo, data_only=True, read_only=True)
+            try:
+                resumen_c10 = workbook["RESUMEN"]["C10"].value
+                resumen_c11 = workbook["RESUMEN"]["C11"].value
 
-                    try:
-                        resumen_c10 = workbook["RESUMEN"]["C10"].value
-                        resumen_c11 = workbook["RESUMEN"]["C11"].value
+                for hoja in hojas_con_datos:
+                    hoja_centro = workbook[hoja]
+                    nombre_centro = hoja_centro["D18"].value.strip()
+                    nombre_entidad = hoja_centro["D12"].value
 
-                        for hoja in hojas_con_datos:
-                            hoja_centro = workbook[hoja]
-                            nombre_centro = hoja_centro["D18"].value.strip()
-                            nombre_entidad = hoja_centro["D12"].value
+                    if nombre_entidad is None:
+                        nombre_entidad = resumen_c10
+                    if nombre_entidad is None:
+                        nombre_entidad = resumen_c11
 
-                            if nombre_entidad is None:
-                                nombre_entidad = resumen_c10
-                            if nombre_entidad is None:
-                                nombre_entidad = resumen_c11
+                    nombre_entidad = nombre_entidad.strip()
+                    print(f"Trabajando: {nombre_entidad}, {nombre_centro}, hoja={hoja}, archivo={insumo}")
 
-                            nombre_entidad = nombre_entidad.strip()
-                            print(f"Trabajando: {nombre_entidad}, {nombre_centro}, hoja={hoja}, archivo={insumo}")
-                            datos_centro = datos_hojas[hoja].copy()
-                    finally:
-                        workbook.close()
+                    datos_centro = datos_hojas[hoja].copy()
 
-                print(f"⏱ Archivo terminado en {perf_counter() - inicio_archivo:.1f} s: {insumo.name}")
-
-
-                # Renombramos la columna Cantidad por total y la columna ID por codigo
-                datos_centro.rename(
-                    columns={
-                        datos_centro.columns[0]: "codigo",
-                        datos_centro.columns[1]: "incidente",
-                        datos_centro.columns[2]: "total",
-                    },
-                    inplace=True,
-                )
-                # Pasar la primera letra de cada centro a mayúscula y hacerle strip
-                datos_centro["incidente"] = datos_centro["incidente"].str.title().str.strip()
-                datos_centro["total"] = pd.to_numeric(datos_centro["total"], errors="coerce").fillna(0)
-
-                # Quitamos todas las filas que no correspondan a un código existente
-                # Esto se debe a que a veces ponen filas de "Total"
-                datos_centro = datos_centro[datos_centro["codigo"].isin(codigos)].copy()
-                # Agregamos columna con el nombre del centro y con el nombre de la entidad federativa
-                datos_centro = datos_centro.assign(
-                    estado=nombre_entidad.strip(),
-                    centro=nombre_centro.strip(),
-                    ao=anio_mes_pasado,
-                    mes=mes_pasado,
-                    mes_largo=nombre_mes_pasado,
-                    fecha=fecha_mes_pasado.replace(day=1),
-                )
-                mapeo_estado = {
-                    "México": "MEXICO",
-                    "Michoacán": "MICHOACAN DE OCAMPO",
-                }
-                datos_centro.estado = datos_centro.estado.replace(mapeo_estado)
-                datos_centro.estado = datos_centro.estado.str.upper()
-                # Si tiene código improcedente entonces ponemos el valor "Improcedentes" en procedencia. De lo contrario ponemos "Procedentes"
-                codigos_improcedentes = [
-                    70101,
-                    70102,
-                    70103,
-                    70104,
-                    70105,
-                    70106,
-                    70107,
-                    70108,
-                ]
-                datos_centro.loc[
-                    datos_centro["codigo"].isin(codigos_improcedentes), "procedencia"
-                ] = "Improcedentes"
-                datos_centro.loc[
-                    ~(datos_centro["codigo"].isin(codigos_improcedentes)), "procedencia"
-                ] = "Procedentes"
-
-                datos_centro.estado = (
-                    datos_centro.estado.str.title().replace(mapa_estados).str.upper()
-                )
-
-                datos_centro["incidente"] = datos_centro["codigo"].map(codigo_incidente)
-                datos_centro["region"] = datos_centro["estado"].map(estado_a_region).fillna("")
-                datos_centro["tipo"] = datos_centro["codigo"].map(codigo_a_tipo).fillna("")
-                
-
-
-                datos_centro = datos_centro[columnas_long]
-
-                # Hacemos las validaciones y agregamos los errores a la lista de validaciones
-                if nombre_centro not in centros_historicos:
-                    # Si el centro no existe en el reporte anual entonces agrega un error
-                    validaciones.append(
-                        {
-                            "clave_error": "centro_no_existe",
-                            "centro": nombre_centro,
-                            "entidad": nombre_entidad,
-                            "archivo": str(insumo),
-                            "hoja": hoja,
-                        }
+                    datos_centro.rename(
+                        columns={
+                            datos_centro.columns[0]: "codigo",
+                            datos_centro.columns[1]: "incidente",
+                            datos_centro.columns[2]: "total",
+                        },
+                        inplace=True,
                     )
-                if not (datos_centro["total"] >= 0).all():
-                    # Si algún valor de llamadas es negativo entonces agrega un error
-                    filas_con_error = list(
-                        datos_centro[datos_centro["total"] < 0]["incidente"]
+
+                    datos_centro["incidente"] = datos_centro["incidente"].str.title().str.strip()
+                    datos_centro["total"] = pd.to_numeric(datos_centro["total"], errors="coerce").fillna(0)
+                    datos_centro = datos_centro[datos_centro["codigo"].isin(codigos)].copy()
+
+                    datos_centro = datos_centro.assign(
+                        estado=nombre_entidad,
+                        centro=nombre_centro,
+                        ao=anio_mes_pasado,
+                        mes=mes_pasado,
+                        mes_largo=nombre_mes_pasado,
+                        fecha=fecha_mes_pasado.replace(day=1),
                     )
-                    validaciones.append(
-                        {
-                            "clave_error": "numeros_negativos",
-                            "centro": nombre_centro,
-                            "entidad": nombre_entidad,
-                            "archivo": str(insumo),
-                            "hoja": hoja,
-                            "incidentes": filas_con_error,
-                        }
+
+                    mapeo_estado = {
+                        "México": "MEXICO",
+                        "Michoacán": "MICHOACAN DE OCAMPO",
+                    }
+
+                    datos_centro["estado"] = datos_centro["estado"].replace(mapeo_estado).str.upper()
+                    datos_centro["procedencia"] = np.where(datos_centro["codigo"].isin(codigos_improcedentes), "Improcedentes", "Procedentes")
+                    datos_centro["estado"] = datos_centro["estado"].str.title().replace(mapa_estados).str.upper()
+
+                    datos_centro["incidente"] = datos_centro["codigo"].map(codigo_incidente)
+                    datos_centro["region"] = datos_centro["estado"].map(estado_a_region).fillna("")
+                    datos_centro["tipo"] = datos_centro["codigo"].map(codigo_a_tipo).fillna("")
+
+                    datos_centro = datos_centro[columnas_long]
+
+                    if nombre_centro not in centros_historicos:
+                        validaciones.append(
+                            {
+                                "clave_error": "centro_no_existe",
+                                "centro": nombre_centro,
+                                "entidad": nombre_entidad,
+                                "archivo": str(insumo),
+                                "hoja": hoja,
+                            }
+                        )
+
+                    if not (datos_centro["total"] >= 0).all():
+                        filas_con_error = list(datos_centro[datos_centro["total"] < 0]["incidente"])
+                        validaciones.append(
+                            {
+                                "clave_error": "numeros_negativos",
+                                "centro": nombre_centro,
+                                "entidad": nombre_entidad,
+                                "archivo": str(insumo),
+                                "hoja": hoja,
+                                "incidentes": filas_con_error,
+                            }
+                        )
+
+                    datos_mes_pasado = datos_centro[
+                        (datos_centro["mes"] == mes_pasado)
+                        & (datos_centro["ao"] == anio_mes_pasado)
+                    ][columnas_long]
+
+                    datos_mes_anterior = datos_centro[
+                        (datos_centro["mes"] == mes_anterior)
+                        & (datos_centro["ao"] == mes_anterior)
+                    ][columnas_long]
+
+                    datos_ambos_meses = datos_mes_pasado.join(
+                        datos_mes_anterior,
+                        "codigo",
+                        lsuffix="_pasado",
+                        rsuffix="_anterior",
                     )
-                # Hacemos un join de los datos del mes pasado y del anterior para comparar las cantidades
-                columnas_validacion = ["codigo", "ao", "total", "mes"]
-                datos_mes_pasado = datos_centro[
-                    (datos_centro["mes"] == mes_pasado)
-                    & (datos_centro["ao"] == anio_mes_pasado)
-                ][columnas_long]
-                datos_mes_anterior = datos_centro[
-                    (datos_centro["mes"] == mes_anterior)
-                    & (datos_centro["ao"] == mes_anterior)
-                ][columnas_long]
-                datos_ambos_meses = datos_mes_pasado.join(
-                    datos_mes_anterior, "codigo", lsuffix="_pasado", rsuffix="_anterior"
-                )
-                if (
-                    datos_ambos_meses["total_pasado"]
-                    == datos_ambos_meses["total_anterior"]
-                ).all():
-                    # Si los valores del mes pasado son iguales a los del mes anterior entonces agrega un error
-                    validaciones.append(
-                        {
-                            "clave_error": "mes_pasado_igual_anterior",
-                            "centro": nombre_centro,
-                            "entidad": nombre_entidad,
-                            "archivo": str(insumo),
-                            "hoja": hoja,
-                        }
+
+                    if (
+                        datos_ambos_meses["total_pasado"]
+                        == datos_ambos_meses["total_anterior"]
+                    ).all():
+                        validaciones.append(
+                            {
+                                "clave_error": "mes_pasado_igual_anterior",
+                                "centro": nombre_centro,
+                                "entidad": nombre_entidad,
+                                "archivo": str(insumo),
+                                "hoja": hoja,
+                            }
+                        )
+
+                    datos_anio_pasado = datos_centro[
+                        (datos_centro["mes"] == mes_pasado)
+                        & (datos_centro["ao"] == (anio_mes_pasado - 1))
+                    ][columnas_long]
+
+                    datos_ambos_meses = datos_mes_pasado.join(
+                        datos_anio_pasado,
+                        "codigo",
+                        lsuffix="_pasado",
+                        rsuffix="_anio_pasado",
                     )
-                # Hacemos un join de los datos del mes pasado con los del año anterior en ese mismo mes
-                datos_anio_pasado = datos_centro[
-                    (datos_centro["mes"] == mes_pasado)
-                    & (datos_centro["ao"] == (anio_mes_pasado - 1))
-                ][columnas_long]
-                datos_ambos_meses = datos_mes_pasado.join(
-                    datos_anio_pasado,
-                    "codigo",
-                    lsuffix="_pasado",
-                    rsuffix="_anio_pasado",
-                )
-                if (
-                    datos_ambos_meses["total_pasado"]
-                    == datos_ambos_meses["total_anio_pasado"]
-                ).all():
-                    # Si los valores del mes pasado son iguales a los del año pasado en el mismo mes entonces agrega un error
-                    validaciones.append(
-                        {
-                            "clave_error": "mes_pasado_igual_anio_pasado",
-                            "centro": nombre_centro,
-                            "entidad": nombre_entidad,
-                            "archivo": str(insumo),
-                            "hoja": hoja,
-                        }
-                    )
-                if datos_centro.total.sum() == 0:
-                    validaciones.append(
-                        {
-                            "clave_error": "suma_total_cero",
-                            "centro": nombre_centro,
-                            "entidad": nombre_entidad,
-                            "archivo": str(insumo),
-                            "hoja": hoja,
-                        }
-                    )
-                resultados.append(datos_centro)
+
+                    if (
+                        datos_ambos_meses["total_pasado"]
+                        == datos_ambos_meses["total_anio_pasado"]
+                    ).all():
+                        validaciones.append(
+                            {
+                                "clave_error": "mes_pasado_igual_anio_pasado",
+                                "centro": nombre_centro,
+                                "entidad": nombre_entidad,
+                                "archivo": str(insumo),
+                                "hoja": hoja,
+                            }
+                        )
+
+                    if datos_centro["total"].sum() == 0:
+                        validaciones.append(
+                            {
+                                "clave_error": "suma_total_cero",
+                                "centro": nombre_centro,
+                                "entidad": nombre_entidad,
+                                "archivo": str(insumo),
+                                "hoja": hoja,
+                            }
+                        )
+
+                    resultados.append(datos_centro)
+
+            finally:
+                workbook.close()
+
+        print(f"⏱ Archivo terminado en {perf_counter() - inicio_archivo:.1f} s: {insumo.name}")
+
     return resultados, validaciones
 
 def normalizar_clave_entidad(valor):
