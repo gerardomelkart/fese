@@ -543,6 +543,20 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
         json.dump(validaciones, f)
 
     copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida)
+    
+
+def copiar_reemplazo_seguro(origen, destino):
+    temporal = destino.with_name(f"~TEMP_{destino.name}")
+
+    if temporal.exists():
+        temporal.unlink()
+
+    shutil.copy2(origen, temporal)
+
+    try:
+        os.replace(temporal, destino)
+    except PermissionError as e:
+        raise PermissionError(f"No se pudo reemplazar el archivo porque probablemente está abierto o bloqueado: {destino}") from e
 
 
 def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
@@ -554,10 +568,11 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
     else:
         shutil.copytree(CARPETA_INSUMOS, carpeta_formatos)
         print(f"Formatos copiados a: {carpeta_formatos}")
-    destino_excel = CARPETA_DESTINO / archivo_excel.name
-    destino_rds = CARPETA_DESTINO / archivo_rds.name
-    shutil.copy2(archivo_excel, destino_excel)
-    shutil.copy2(archivo_rds, destino_rds)
+        destino_excel = CARPETA_DESTINO / archivo_excel.name
+        destino_rds = CARPETA_DESTINO / archivo_rds.name
+
+        copiar_reemplazo_seguro(archivo_excel, destino_excel)
+        copiar_reemplazo_seguro(archivo_rds, destino_rds)
 
     archivo_cniedt = generar_formato_cniedt(salida)
 
