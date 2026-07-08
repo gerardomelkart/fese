@@ -548,9 +548,10 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
     carpeta_formatos = CARPETA_DESTINO / f"Formatos {nombre_mes_pasado} {anio_mes_pasado}"
 
     if carpeta_formatos.exists():
-        raise FileExistsError(f"Ya existe la carpeta de formatos: {carpeta_formatos}. No se sobrescribirá.")
-
-    shutil.copytree(CARPETA_INSUMOS, carpeta_formatos)
+        print(f"La carpeta de formatos ya existe, se omite la copia: {carpeta_formatos}")
+    else:
+        shutil.copytree(CARPETA_INSUMOS, carpeta_formatos)
+        print(f"Formatos copiados a: {carpeta_formatos}")
     destino_excel = CARPETA_DESTINO / archivo_excel.name
     destino_rds = CARPETA_DESTINO / archivo_rds.name
     shutil.copy2(archivo_excel, destino_excel)
@@ -564,7 +565,6 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
     print(f"Excel copiado a: {destino_excel}")
     print(f"RDS copiado a: {destino_rds}")
     print(f"CNIEDT generado en: {archivo_cniedt}")
-    print(f"Formatos copiados a: {carpeta_formatos}")
 
     for item in CARPETA_INSUMOS.iterdir():
         if item.is_dir():
