@@ -4,6 +4,7 @@ import locale
 import shutil
 import json
 import re
+import os
 import win32com.client as win32
 
 import pandas as pd
@@ -12,33 +13,28 @@ import numpy as np
 import pyreadr
 from unidecode import unidecode
 from time import perf_counter
-import os
 
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_INSUMOS = BASE_DIR / "insumos"
 CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
 CARPETA_PLANTILLAS = BASE_DIR / "plantillas"
 PLANTILLA_CNIEDT = CARPETA_PLANTILLAS / "Formato CNIEDT plantilla.xlsx"
-
+CARPETA_CACHE = Path(os.getenv("LOCALAPPDATA", str(BASE_DIR))) / "FESE" / "cache"
 
 # REVISAR BIEN PUEBLA Y SINALOA que cuadren el total con loq eu mandan en el excel
 # Hacer validación de que sean todos números enteros
 
-# Configuramos la localización en español de México para que nos dé el nombre correcto del mes pasado
 locale.setlocale(locale.LC_TIME, "es_MX.UTF-8")
 
-# Conseguimos el nombre del mes pasado a través del día de hoy
 fecha_mes_pasado = dt.date.today().replace(day=1) - dt.timedelta(days=1)
 nombre_mes_pasado = fecha_mes_pasado.strftime("%B").title()
 mes_pasado = int(fecha_mes_pasado.strftime("%#m"))
 anio_mes_pasado = int(fecha_mes_pasado.strftime("%Y"))
 
-# Conseguimos el nombre del mes anterior al pasado a través del día de hoy
 fecha_mes_anterior = fecha_mes_pasado.replace(day=1) - dt.timedelta(days=1)
 nombre_mes_anterior = fecha_mes_anterior.strftime("%B").title()
 mes_anterior = int(fecha_mes_anterior.strftime("%#m"))
 anio_mes_anterior = int(fecha_mes_anterior.strftime("%Y"))
-
 
 mapa_estados = {
     "Aguascalientes": "Aguascalientes",
@@ -77,20 +73,17 @@ mapa_estados = {
     "Zacatecas": "Zacatecas",
 }
 
-columnas_long = [
-    "codigo",
-    "ao",
-    "procedencia",
-    "region",
-    "estado",
-    "centro",
-    "tipo",
-    "incidente",
-    "total",
-    "mes",
-    "mes_largo",
-    "fecha",
-]
+columnas_long = ["codigo", "ao", "procedencia", "region", "estado", "centro", "tipo", "incidente", "total", "mes", "mes_largo", "fecha"]
+
+MAPA_ESTADOS_HISTORICO = {
+    "CIUDAD DE MEXICO": "CIUDAD DE MÉXICO",
+    "ESTADO DE MEXICO": "ESTADO DE MÉXICO",
+    "NUEVO LEON": "NUEVO LEÓN",
+    "QUERETARO": "QUERÉTARO",
+    "SAN LUIS POTOSI": "SAN LUIS POTOSÍ",
+    "YUCATAN": "YUCATÁN",
+    "COAHUILA": "COAHUILA DE ZARAGOZA",
+}
 
 
 def proceso_fese():
@@ -98,7 +91,7 @@ def proceso_fese():
 
     inicio = perf_counter()
     fese = cargar_y_limpiar(BASE_DIR / f"fese{anio_mes_anterior}-{mes_anterior}.rds")
-    print(f"⏱ RDS histórico cargado en {perf_counter() - inicio:.1f} s")
+    print(f"⏱ Histórico cargado en {perf_counter() - inicio:.1f} s")
 
     insumos = obtener_insumos(CARPETA_INSUMOS)
     print(f"📁 Insumos encontrados: {len(insumos)}")
@@ -110,31 +103,90 @@ def proceso_fese():
     inicio = perf_counter()
     generar_salidas(fese, columnas_long, resultados, validaciones)
     print(f"⏱ Salidas generadas en {perf_counter() - inicio:.1f} s")
-
     print(f"⏱ PROCESO TOTAL: {perf_counter() - inicio_total:.1f} s")
 
 
-def cargar_y_limpiar(nombre_archivo="df_fese.rds"):
-    # Cargamos el archivo histórico en un dataframe
-    fese = pyreadr.read_r(nombre_archivo)[None]  # pd.read_excel("fese.xlsx")
+def normalizar_historico(fese):
     fese["codigo"] = fese["codigo"].astype(int)
-    mapa_estados = {
-        "CIUDAD DE MEXICO": "CIUDAD DE MÉXICO",
-        "ESTADO DE MEXICO": "ESTADO DE MÉXICO",
-        "NUEVO LEON": "NUEVO LEÓN",
-        "QUERETARO": "QUERÉTARO",
-        "SAN LUIS POTOSI": "SAN LUIS POTOSÍ",
-        "YUCATAN": "YUCATÁN",
-        "COAHUILA": "COAHUILA DE ZARAGOZA",
-    }
-    fese.estado = fese.estado.str.upper()
-    fese.estado = fese.estado.replace(mapa_estados)
+    fese["estado"] = fese["estado"].str.upper().replace(MAPA_ESTADOS_HISTORICO)
+    return fese
+
+
+def rutas_cache_historico(nombre_archivo):
+    nombre_archivo = Path(nombre_archivo)
+    return CARPETA_CACHE / f"{nombre_archivo.stem}.pkl", CARPETA_CACHE / f"{nombre_archivo.stem}.meta.json"
+
+
+def huella_archivo(nombre_archivo):
+    nombre_archivo = Path(nombre_archivo)
+    stat = nombre_archivo.stat()
+    return {"nombre": nombre_archivo.name, "tamano": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def cache_historico_valida(nombre_archivo, archivo_cache, archivo_meta):
+    if not archivo_cache.is_file() or not archivo_meta.is_file():
+        return False
+    try:
+        with open(archivo_meta, "r", encoding="utf-8") as f:
+            return json.load(f) == huella_archivo(nombre_archivo)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def guardar_cache_historico(fese, nombre_archivo):
+    inicio = perf_counter()
+    CARPETA_CACHE.mkdir(parents=True, exist_ok=True)
+    archivo_cache, archivo_meta = rutas_cache_historico(nombre_archivo)
+    temporal_cache = archivo_cache.with_name(f"~TEMP_{archivo_cache.name}")
+    temporal_meta = archivo_meta.with_name(f"~TEMP_{archivo_meta.name}")
+
+    for temporal in (temporal_cache, temporal_meta):
+        if temporal.exists():
+            temporal.unlink()
+
+    fese.to_pickle(temporal_cache)
+    with open(temporal_meta, "w", encoding="utf-8") as f:
+        json.dump(huella_archivo(nombre_archivo), f)
+
+    os.replace(temporal_cache, archivo_cache)
+    os.replace(temporal_meta, archivo_meta)
+    print(f"⚡ Cache histórico actualizado en {perf_counter() - inicio:.1f} s: {archivo_cache}")
+
+
+def limpiar_caches_antiguos():
+    if not CARPETA_CACHE.is_dir():
+        return
+    conservar = {f"fese{anio_mes_pasado}-{mes_pasado}", f"fese{anio_mes_anterior}-{mes_anterior}"}
+    for archivo in CARPETA_CACHE.iterdir():
+        if archivo.is_file() and archivo.name.startswith("fese") and archivo.name.split(".", 1)[0] not in conservar:
+            archivo.unlink()
+
+
+def cargar_y_limpiar(nombre_archivo="df_fese.rds"):
+    nombre_archivo = Path(nombre_archivo)
+    archivo_cache, archivo_meta = rutas_cache_historico(nombre_archivo)
+
+    if cache_historico_valida(nombre_archivo, archivo_cache, archivo_meta):
+        inicio = perf_counter()
+        try:
+            fese = pd.read_pickle(archivo_cache)
+            print(f"⚡ Cache histórico cargado en {perf_counter() - inicio:.1f} s: {archivo_cache}")
+            return fese
+        except Exception as e:
+            print(f"⚠ No se pudo usar el cache histórico; se leerá el RDS: {e}")
+
+    fese = pyreadr.read_r(str(nombre_archivo))[None]
+    fese = normalizar_historico(fese)
+
+    try:
+        guardar_cache_historico(fese, nombre_archivo)
+    except Exception as e:
+        print(f"⚠ No se pudo guardar el cache histórico; el proceso continúa: {e}")
+
     return fese
 
 
 def obtener_insumos(path_insumos="insumos"):
-    # Obtenemos los nombres de todos los archivos de Excel insumo.
-    # Esto se hace leyendo todos los objetos dentro del directorio e ignorando los que no son un archivo
     return [p for p in Path(path_insumos).iterdir() if p.is_file() and p.suffix.lower() in [".xlsx", ".xlsm", ".xls"] and not p.name.startswith("~$")]
 
 
@@ -186,138 +238,46 @@ def leer_insumos(fese, insumos):
                     print(f"Trabajando: {nombre_entidad}, {nombre_centro}, hoja={hoja}, archivo={insumo}")
 
                     datos_centro = datos_hojas[hoja].copy()
-
-                    datos_centro.rename(
-                        columns={
-                            datos_centro.columns[0]: "codigo",
-                            datos_centro.columns[1]: "incidente",
-                            datos_centro.columns[2]: "total",
-                        },
-                        inplace=True,
-                    )
+                    datos_centro.rename(columns={datos_centro.columns[0]: "codigo", datos_centro.columns[1]: "incidente", datos_centro.columns[2]: "total"}, inplace=True)
 
                     datos_centro["incidente"] = datos_centro["incidente"].str.title().str.strip()
                     datos_centro["total"] = pd.to_numeric(datos_centro["total"], errors="coerce").fillna(0)
                     datos_centro = datos_centro[datos_centro["codigo"].isin(codigos)].copy()
 
-                    datos_centro = datos_centro.assign(
-                        estado=nombre_entidad,
-                        centro=nombre_centro,
-                        ao=anio_mes_pasado,
-                        mes=mes_pasado,
-                        mes_largo=nombre_mes_pasado,
-                        fecha=fecha_mes_pasado.replace(day=1),
-                    )
-
-                    mapeo_estado = {
-                        "México": "MEXICO",
-                        "Michoacán": "MICHOACAN DE OCAMPO",
-                    }
-
+                    datos_centro = datos_centro.assign(estado=nombre_entidad, centro=nombre_centro, ao=anio_mes_pasado, mes=mes_pasado, mes_largo=nombre_mes_pasado, fecha=fecha_mes_pasado.replace(day=1))
+                    mapeo_estado = {"México": "MEXICO", "Michoacán": "MICHOACAN DE OCAMPO"}
                     datos_centro["estado"] = datos_centro["estado"].replace(mapeo_estado).str.upper()
                     datos_centro["procedencia"] = np.where(datos_centro["codigo"].isin(codigos_improcedentes), "Improcedentes", "Procedentes")
                     datos_centro["estado"] = datos_centro["estado"].str.title().replace(mapa_estados).str.upper()
-
                     datos_centro["incidente"] = datos_centro["codigo"].map(codigo_incidente)
                     datos_centro["region"] = datos_centro["estado"].map(estado_a_region).fillna("")
                     datos_centro["tipo"] = datos_centro["codigo"].map(codigo_a_tipo).fillna("")
-
                     datos_centro = datos_centro[columnas_long]
 
                     if nombre_centro not in centros_historicos:
-                        validaciones.append(
-                            {
-                                "clave_error": "centro_no_existe",
-                                "centro": nombre_centro,
-                                "entidad": nombre_entidad,
-                                "archivo": str(insumo),
-                                "hoja": hoja,
-                            }
-                        )
+                        validaciones.append({"clave_error": "centro_no_existe", "centro": nombre_centro, "entidad": nombre_entidad, "archivo": str(insumo), "hoja": hoja})
 
                     if not (datos_centro["total"] >= 0).all():
                         filas_con_error = list(datos_centro[datos_centro["total"] < 0]["incidente"])
-                        validaciones.append(
-                            {
-                                "clave_error": "numeros_negativos",
-                                "centro": nombre_centro,
-                                "entidad": nombre_entidad,
-                                "archivo": str(insumo),
-                                "hoja": hoja,
-                                "incidentes": filas_con_error,
-                            }
-                        )
+                        validaciones.append({"clave_error": "numeros_negativos", "centro": nombre_centro, "entidad": nombre_entidad, "archivo": str(insumo), "hoja": hoja, "incidentes": filas_con_error})
 
-                    datos_mes_pasado = datos_centro[
-                        (datos_centro["mes"] == mes_pasado)
-                        & (datos_centro["ao"] == anio_mes_pasado)
-                    ][columnas_long]
+                    datos_mes_pasado = datos_centro[(datos_centro["mes"] == mes_pasado) & (datos_centro["ao"] == anio_mes_pasado)][columnas_long]
+                    datos_mes_anterior = datos_centro[(datos_centro["mes"] == mes_anterior) & (datos_centro["ao"] == mes_anterior)][columnas_long]
+                    datos_ambos_meses = datos_mes_pasado.join(datos_mes_anterior, "codigo", lsuffix="_pasado", rsuffix="_anterior")
 
-                    datos_mes_anterior = datos_centro[
-                        (datos_centro["mes"] == mes_anterior)
-                        & (datos_centro["ao"] == mes_anterior)
-                    ][columnas_long]
+                    if (datos_ambos_meses["total_pasado"] == datos_ambos_meses["total_anterior"]).all():
+                        validaciones.append({"clave_error": "mes_pasado_igual_anterior", "centro": nombre_centro, "entidad": nombre_entidad, "archivo": str(insumo), "hoja": hoja})
 
-                    datos_ambos_meses = datos_mes_pasado.join(
-                        datos_mes_anterior,
-                        "codigo",
-                        lsuffix="_pasado",
-                        rsuffix="_anterior",
-                    )
+                    datos_anio_pasado = datos_centro[(datos_centro["mes"] == mes_pasado) & (datos_centro["ao"] == (anio_mes_pasado - 1))][columnas_long]
+                    datos_ambos_meses = datos_mes_pasado.join(datos_anio_pasado, "codigo", lsuffix="_pasado", rsuffix="_anio_pasado")
 
-                    if (
-                        datos_ambos_meses["total_pasado"]
-                        == datos_ambos_meses["total_anterior"]
-                    ).all():
-                        validaciones.append(
-                            {
-                                "clave_error": "mes_pasado_igual_anterior",
-                                "centro": nombre_centro,
-                                "entidad": nombre_entidad,
-                                "archivo": str(insumo),
-                                "hoja": hoja,
-                            }
-                        )
-
-                    datos_anio_pasado = datos_centro[
-                        (datos_centro["mes"] == mes_pasado)
-                        & (datos_centro["ao"] == (anio_mes_pasado - 1))
-                    ][columnas_long]
-
-                    datos_ambos_meses = datos_mes_pasado.join(
-                        datos_anio_pasado,
-                        "codigo",
-                        lsuffix="_pasado",
-                        rsuffix="_anio_pasado",
-                    )
-
-                    if (
-                        datos_ambos_meses["total_pasado"]
-                        == datos_ambos_meses["total_anio_pasado"]
-                    ).all():
-                        validaciones.append(
-                            {
-                                "clave_error": "mes_pasado_igual_anio_pasado",
-                                "centro": nombre_centro,
-                                "entidad": nombre_entidad,
-                                "archivo": str(insumo),
-                                "hoja": hoja,
-                            }
-                        )
+                    if (datos_ambos_meses["total_pasado"] == datos_ambos_meses["total_anio_pasado"]).all():
+                        validaciones.append({"clave_error": "mes_pasado_igual_anio_pasado", "centro": nombre_centro, "entidad": nombre_entidad, "archivo": str(insumo), "hoja": hoja})
 
                     if datos_centro["total"].sum() == 0:
-                        validaciones.append(
-                            {
-                                "clave_error": "suma_total_cero",
-                                "centro": nombre_centro,
-                                "entidad": nombre_entidad,
-                                "archivo": str(insumo),
-                                "hoja": hoja,
-                            }
-                        )
+                        validaciones.append({"clave_error": "suma_total_cero", "centro": nombre_centro, "entidad": nombre_entidad, "archivo": str(insumo), "hoja": hoja})
 
                     resultados.append(datos_centro)
-
             finally:
                 workbook.close()
 
@@ -325,22 +285,20 @@ def leer_insumos(fese, insumos):
 
     return resultados, validaciones
 
+
 def normalizar_clave_entidad(valor):
     clave = unidecode(str(valor)).strip().upper()
-    equivalencias = {
-        "COAHUILA DE ZARAGOZA": "COAHUILA",
-        "ESTADO DE MEXICO": "MEXICO",
-        "MICHOACAN DE OCAMPO": "MICHOACAN",
-        "VERACRUZ DE IGNACIO DE LA LLAVE": "VERACRUZ",
-    }
+    equivalencias = {"COAHUILA DE ZARAGOZA": "COAHUILA", "ESTADO DE MEXICO": "MEXICO", "MICHOACAN DE OCAMPO": "MICHOACAN", "VERACRUZ DE IGNACIO DE LA LLAVE": "VERACRUZ"}
     return equivalencias.get(clave, clave)
 
+
 def generar_formato_cniedt(salida):
+    inicio_cniedt = perf_counter()
+
     if not PLANTILLA_CNIEDT.is_file():
         raise FileNotFoundError(f"No existe la plantilla CNIEDT: {PLANTILLA_CNIEDT}")
 
     datos = salida[(salida["ao"] == anio_mes_pasado) & (salida["mes"] == mes_pasado) & (salida["procedencia"] == "Procedentes")].copy()
-
     if datos.empty:
         raise ValueError(f"No hay datos procedentes para {nombre_mes_pasado} {anio_mes_pasado}.")
 
@@ -352,7 +310,6 @@ def generar_formato_cniedt(salida):
 
     if archivo_temporal.exists():
         archivo_temporal.unlink()
-
     shutil.copy2(PLANTILLA_CNIEDT, archivo_temporal)
 
     excel = None
@@ -365,13 +322,11 @@ def generar_formato_cniedt(salida):
 
         libro = excel.Workbooks.Open(str(archivo_temporal))
         hoja = libro.Worksheets("Llamadas procedentes 911")
-
         tabla = None
 
         for i in range(1, hoja.ListObjects.Count + 1):
             candidata = hoja.ListObjects(i)
             encabezados = [str(candidata.HeaderRowRange.Cells(1, j).Value).strip() for j in range(1, candidata.ListColumns.Count + 1)]
-
             if {"Entidad", "Mes", "Número", "TOTAL"}.issubset(set(encabezados)):
                 tabla = candidata
                 break
@@ -384,7 +339,6 @@ def generar_formato_cniedt(salida):
         idx_mes = encabezados.index("Mes") + 1
         idx_numero = encabezados.index("Número") + 1
         idx_total = encabezados.index("TOTAL") + 1
-
         filas_objetivo = []
         entidades_formato = set()
 
@@ -392,7 +346,6 @@ def generar_formato_cniedt(salida):
             entidad = tabla.DataBodyRange.Cells(fila, idx_entidad).Value
             mes = tabla.DataBodyRange.Cells(fila, idx_mes).Value
             numero = tabla.DataBodyRange.Cells(fila, idx_numero).Value
-
             try:
                 es_911 = int(float(numero)) == 911
             except (TypeError, ValueError):
@@ -411,7 +364,6 @@ def generar_formato_cniedt(salida):
 
         if faltantes:
             raise ValueError(f"Faltan entidades en los datos FESE: {sorted(faltantes)}")
-
         if extras:
             raise ValueError(f"Hay entidades FESE que no coinciden con el formato CNIEDT: {sorted(extras)}")
 
@@ -420,11 +372,9 @@ def generar_formato_cniedt(salida):
 
         excel.CalculateFull()
         libro.Save()
-
     finally:
         if libro is not None:
             libro.Close(SaveChanges=True)
-
         if excel is not None:
             excel.Quit()
 
@@ -433,11 +383,17 @@ def generar_formato_cniedt(salida):
     except PermissionError as e:
         raise PermissionError(f"No se pudo reemplazar el CNIEDT porque el archivo destino probablemente está abierto o bloqueado: {archivo_salida}") from e
 
+    print(f"⏱ Generación CNIEDT: {perf_counter() - inicio_cniedt:.1f} s")
     return archivo_salida
 
+
 def generar_salidas(fese, columnas_long, resultados, validaciones):
+    inicio_total = perf_counter()
+
+    inicio = perf_counter()
     resultados = [fese[columnas_long]] + resultados
     salida = pd.concat(resultados, ignore_index=True)
+    print(f"⏱ Concatenación histórica: {perf_counter() - inicio:.1f} s")
 
     mapeo_centro = {
         "Izucar De Matamoros": "Izúcar De Matamoros",
@@ -452,111 +408,70 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
         "C4 Martinez de la torre": "C4 Martínez de la torre",
     }
     salida.centro = salida.centro.replace(mapeo_centro)
-    wide = salida[columnas_long].pivot(
-        index=[
-            "ao",
-            "region",
-            "estado",
-            "centro",
-            "tipo",
-            "codigo",
-            "incidente",
-            "procedencia",
-        ],
-        columns="mes_largo",
-        values="total",
-    )
 
+    inicio = perf_counter()
+    wide = salida[columnas_long].pivot(index=["ao", "region", "estado", "centro", "tipo", "codigo", "incidente", "procedencia"], columns="mes_largo", values="total")
     wide = wide.reset_index()
+    print(f"⏱ Pivot anual: {perf_counter() - inicio:.1f} s")
 
     wide.estado = wide.estado.str.title().replace(mapa_estados).str.upper()
+    wide.rename(columns={"codigo": "Código", "ao": "Año", "procedencia": "Procedencia", "region": "Region", "estado": "Estado", "centro": "Centro", "tipo": "Tipo", "incidente": "Incidente"}, inplace=True)
 
-    wide.rename(
-        columns={
-            "codigo": "Código",
-            "ao": "Año",
-            "procedencia": "Procedencia",
-            "region": "Region",
-            "estado": "Estado",
-            "centro": "Centro",
-            "tipo": "Tipo",
-            "incidente": "Incidente",
-        },
-        inplace=True,
-    )
-
-    columnas_wide = [
-        "Código",
-        "Año",
-        "Procedencia",
-        "Region",
-        "Estado",
-        "Centro",
-        "Tipo",
-        "Incidente",
-        "Enero",
-        "Febrero",
-        "Marzo",
-        "Abril",
-        "Mayo",
-        "Junio",
-        "Julio",
-        "Agosto",
-        "Septiembre",
-        "Octubre",
-        "Noviembre",
-        "Diciembre",
-    ]
+    columnas_wide = ["Código", "Año", "Procedencia", "Region", "Estado", "Centro", "Tipo", "Incidente", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
     wide = wide[columnas_wide]
-
-    meses = [
-        "Enero",
-        "Febrero",
-        "Marzo",
-        "Abril",
-        "Mayo",
-        "Junio",
-        "Julio",
-        "Agosto",
-        "Septiembre",
-        "Octubre",
-        "Noviembre",
-        "Diciembre",
-    ]
+    meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
     for mes in meses:
         wide[mes] = wide[mes].fillna(0)
 
     wide = wide.sort_values(by=["Año", "Código"], ascending=[True, True])
-
     archivo_excel = BASE_DIR / f"Rep_anual{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
+
+    inicio = perf_counter()
     wide.to_excel(archivo_excel, index=False)
+    print(f"⏱ Escritura Excel anual: {perf_counter() - inicio:.1f} s")
 
     salida.estado = salida.estado.str.title()
     salida.estado = salida.estado.apply(unidecode)
     salida.estado = salida.estado.replace(mapa_estados)
 
     archivo_rds = BASE_DIR / f"fese{anio_mes_pasado}-{mes_pasado}.rds"
+    inicio = perf_counter()
     pyreadr.write_rds(str(archivo_rds), salida)
+    print(f"⏱ Escritura RDS: {perf_counter() - inicio:.1f} s")
+
+    inicio = perf_counter()
+    salida_cache = normalizar_historico(salida.copy(deep=False))
+    try:
+        guardar_cache_historico(salida_cache, archivo_rds)
+        limpiar_caches_antiguos()
+    except Exception as e:
+        print(f"⚠ No se pudo actualizar el cache del nuevo histórico; el proceso continúa: {e}")
+    print(f"⏱ Actualización cache siguiente mes: {perf_counter() - inicio:.1f} s")
 
     with open(BASE_DIR / "validaciones.json", "w") as f:
         json.dump(validaciones, f)
 
+    inicio = perf_counter()
     copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida)
-    
+    print(f"⏱ Copias y CNIEDT: {perf_counter() - inicio:.1f} s")
+    print(f"⏱ generar_salidas TOTAL: {perf_counter() - inicio_total:.1f} s")
+
 
 def copiar_reemplazo_seguro(origen, destino):
+    inicio = perf_counter()
     temporal = destino.with_name(f"~TEMP_{destino.name}")
 
     if temporal.exists():
         temporal.unlink()
-
     shutil.copy2(origen, temporal)
 
     try:
         os.replace(temporal, destino)
     except PermissionError as e:
         raise PermissionError(f"No se pudo reemplazar el archivo porque probablemente está abierto o bloqueado: {destino}") from e
+
+    print(f"⏱ Copia {destino.name}: {perf_counter() - inicio:.1f} s")
 
 
 def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
@@ -571,10 +486,8 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
 
     destino_excel = CARPETA_DESTINO / archivo_excel.name
     destino_rds = CARPETA_DESTINO / archivo_rds.name
-
     copiar_reemplazo_seguro(archivo_excel, destino_excel)
     copiar_reemplazo_seguro(archivo_rds, destino_rds)
-
     archivo_cniedt = generar_formato_cniedt(salida)
 
     if not destino_excel.is_file() or not destino_rds.is_file() or not carpeta_formatos.is_dir() or not archivo_cniedt.is_file():
@@ -596,7 +509,6 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
 
     for archivo in BASE_DIR.iterdir():
         coincidencia = patron_rds.match(archivo.name) or patron_excel.match(archivo.name)
-
         if coincidencia and (int(coincidencia.group(1)), int(coincidencia.group(2))) not in meses_conservar:
             archivo.unlink()
             print(f"Resultado antiguo eliminado: {archivo.name}")
