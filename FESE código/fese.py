@@ -146,7 +146,7 @@ def leer_insumos(fese, insumos):
                 if nombre_entidad is None:
                     nombre_entidad = workbook["RESUMEN"]["C11"].value
                 nombre_entidad = nombre_entidad.strip()
-                print(f"Trabajando: {nombre_entidad}, "f"{nombre_centro}, hoja={hoja}, archivo={insumo}")
+                print(f"Trabajando: {nombre_entidad}, {nombre_centro}, hoja={hoja}, archivo={insumo}")
                 workbook.close()
                 # Cargamos la hoja en un dataframe usando las columnas y filas correctas
                 datos_centro = pd.read_excel(
@@ -167,24 +167,8 @@ def leer_insumos(fese, insumos):
                 datos_centro["incidente"] = (
                     datos_centro["incidente"].str.title().str.strip()
                 )
+                datos_centro["incidente"] = datos_centro["incidente"].str.title().str.strip()
                 datos_centro["total"] = pd.to_numeric(datos_centro["total"], errors="coerce").fillna(0)
-
-                # Validamos que todas las cantidades sean numéricas
-                total_numerico = pd.to_numeric(datos_centro["total"], errors="coerce")
-                mascara_no_numericos = total_numerico.isna()
-
-                if mascara_no_numericos.any():
-                    errores = datos_centro.loc[mascara_no_numericos, ["codigo", "incidente", "total"]]
-                    raise ValueError(
-                        "\n\nSe encontraron cantidades no numéricas.\n"
-                        f"Archivo: {insumo}\n"
-                        f"Hoja: {hoja}\n"
-                        f"Entidad: {nombre_entidad}\n"
-                        f"Centro: {nombre_centro}\n\n"
-                        f"{errores.to_string(index=False)}"
-                    )
-
-                datos_centro["total"] = total_numerico
 
                 # Quitamos todas las filas que no correspondan a un código existente
                 # Esto se debe a que a veces ponen filas de "Total"
@@ -439,17 +423,10 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
     for mes in meses:
         wide[mes] = wide[mes].fillna(0)
 
-    salida_analitica = Path("fese.rds")
-
     wide = wide.sort_values(by=["Año", "Código"], ascending=[True, True])
 
     archivo_excel = BASE_DIR / f"Rep_anual{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
     wide.to_excel(archivo_excel, index=False)
-
-    salida_analitica = BASE_DIR / "fese.rds"
-
-    if salida_analitica.is_file():
-        shutil.copy2(salida_analitica, BASE_DIR / f"fese.rds.bak{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}")
 
     salida.estado = salida.estado.str.title()
     salida.estado = salida.estado.apply(unidecode)
@@ -466,24 +443,30 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
 
 def copiar_resultados_y_limpiar(archivo_excel, archivo_rds):
     CARPETA_DESTINO.mkdir(parents=True, exist_ok=True)
-
     carpeta_formatos = CARPETA_DESTINO / f"Formatos {nombre_mes_pasado} {anio_mes_pasado}"
 
     if carpeta_formatos.exists():
         shutil.rmtree(carpeta_formatos)
 
     shutil.copytree(CARPETA_INSUMOS, carpeta_formatos)
-    shutil.copy2(archivo_excel, CARPETA_DESTINO / archivo_excel.name)
-    shutil.copy2(archivo_rds, CARPETA_DESTINO / archivo_rds.name)
+    destino_excel = CARPETA_DESTINO / archivo_excel.name
+    destino_rds = CARPETA_DESTINO / archivo_rds.name
+    shutil.copy2(archivo_excel, destino_excel)
+    shutil.copy2(archivo_rds, destino_rds)
 
-    # Vaciamos la carpeta original de insumos
+    if not destino_excel.is_file() or not destino_rds.is_file() or not carpeta_formatos.is_dir():
+        raise RuntimeError("No se completó correctamente la copia a OneDrive. No se limpiarán los archivos originales.")
+
+    print(f"Excel copiado a: {destino_excel}")
+    print(f"RDS copiado a: {destino_rds}")
+    print(f"Formatos copiados a: {carpeta_formatos}")
+
     for item in CARPETA_INSUMOS.iterdir():
         if item.is_dir():
             shutil.rmtree(item)
         else:
             item.unlink()
 
-    # Conservamos solamente el mes procesado y el mes anterior
     meses_conservar = {(anio_mes_pasado, mes_pasado), (anio_mes_anterior, mes_anterior)}
     patron_rds = re.compile(r"^fese(\d{4})-(\d{1,2})\.rds$", re.IGNORECASE)
     patron_excel = re.compile(r"^Rep_anual(\d{4})-(\d{1,2})\.xlsx$", re.IGNORECASE)
@@ -491,12 +474,11 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds):
     for archivo in BASE_DIR.iterdir():
         coincidencia = patron_rds.match(archivo.name) or patron_excel.match(archivo.name)
 
-        if coincidencia:
-            anio_archivo = int(coincidencia.group(1))
-            mes_archivo = int(coincidencia.group(2))
+        if coincidencia and (int(coincidencia.group(1)), int(coincidencia.group(2))) not in meses_conservar:
+            archivo.unlink()
+            print(f"Resultado antiguo eliminado: {archivo.name}")
 
-            if (anio_archivo, mes_archivo) not in meses_conservar:
-                archivo.unlink()
+    print("Carpeta insumos vaciada correctamente.")
 
 
 if __name__ == "__main__":
