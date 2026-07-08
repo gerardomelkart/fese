@@ -164,9 +164,6 @@ def leer_insumos(fese, insumos):
                     inplace=True,
                 )
                 # Pasar la primera letra de cada centro a mayúscula y hacerle strip
-                datos_centro["incidente"] = (
-                    datos_centro["incidente"].str.title().str.strip()
-                )
                 datos_centro["incidente"] = datos_centro["incidente"].str.title().str.strip()
                 datos_centro["total"] = pd.to_numeric(datos_centro["total"], errors="coerce").fillna(0)
 
@@ -446,7 +443,7 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds):
     carpeta_formatos = CARPETA_DESTINO / f"Formatos {nombre_mes_pasado} {anio_mes_pasado}"
 
     if carpeta_formatos.exists():
-        shutil.rmtree(carpeta_formatos)
+        raise FileExistsError(f"Ya existe la carpeta de formatos: {carpeta_formatos}. No se sobrescribirá.")
 
     shutil.copytree(CARPETA_INSUMOS, carpeta_formatos)
     destino_excel = CARPETA_DESTINO / archivo_excel.name
