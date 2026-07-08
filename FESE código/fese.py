@@ -16,7 +16,8 @@ from time import perf_counter
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_INSUMOS = BASE_DIR / "insumos"
 CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
-PLANTILLA_CNIEDT = CARPETA_DESTINO / "Formato CNIEDT plantilla.xlsx"
+CARPETA_PLANTILLAS = BASE_DIR / "plantillas"
+PLANTILLA_CNIEDT = CARPETA_PLANTILLAS / "Formato CNIEDT plantilla.xlsx"
 
 
 # REVISAR BIEN PUEBLA Y SINALOA que cuadren el total con loq eu mandan en el excel
@@ -348,7 +349,9 @@ def generar_formato_cniedt(salida):
     archivo_salida = CARPETA_DESTINO / f"Formato CNIEDT {anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
 
     if archivo_salida.exists():
-        raise FileExistsError(f"Ya existe el formato CNIEDT generado: {archivo_salida}")
+        archivo_salida.unlink()
+
+    shutil.copy2(PLANTILLA_CNIEDT, archivo_salida)
 
     shutil.copy2(PLANTILLA_CNIEDT, archivo_salida)
 
