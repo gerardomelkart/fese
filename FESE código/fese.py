@@ -568,11 +568,12 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, salida):
     else:
         shutil.copytree(CARPETA_INSUMOS, carpeta_formatos)
         print(f"Formatos copiados a: {carpeta_formatos}")
-        destino_excel = CARPETA_DESTINO / archivo_excel.name
-        destino_rds = CARPETA_DESTINO / archivo_rds.name
 
-        copiar_reemplazo_seguro(archivo_excel, destino_excel)
-        copiar_reemplazo_seguro(archivo_rds, destino_rds)
+    destino_excel = CARPETA_DESTINO / archivo_excel.name
+    destino_rds = CARPETA_DESTINO / archivo_rds.name
+
+    copiar_reemplazo_seguro(archivo_excel, destino_excel)
+    copiar_reemplazo_seguro(archivo_rds, destino_rds)
 
     archivo_cniedt = generar_formato_cniedt(salida)
 
