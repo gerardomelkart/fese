@@ -11,6 +11,7 @@ import openpyxl
 import numpy as np
 import pyreadr
 from unidecode import unidecode
+from time import perf_counter
 
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_INSUMOS = BASE_DIR / "insumos"
@@ -91,10 +92,24 @@ columnas_long = [
 
 
 def proceso_fese():
+    inicio_total = perf_counter()
+
+    inicio = perf_counter()
     fese = cargar_y_limpiar(BASE_DIR / f"fese{anio_mes_anterior}-{mes_anterior}.rds")
+    print(f"⏱ RDS histórico cargado en {perf_counter() - inicio:.1f} s")
+
     insumos = obtener_insumos(CARPETA_INSUMOS)
+    print(f"📁 Insumos encontrados: {len(insumos)}")
+
+    inicio = perf_counter()
     resultados, validaciones = leer_insumos(fese, insumos)
+    print(f"⏱ Insumos procesados en {perf_counter() - inicio:.1f} s")
+
+    inicio = perf_counter()
     generar_salidas(fese, columnas_long, resultados, validaciones)
+    print(f"⏱ Salidas generadas en {perf_counter() - inicio:.1f} s")
+
+    print(f"⏱ PROCESO TOTAL: {perf_counter() - inicio_total:.1f} s")
 
 
 def cargar_y_limpiar(nombre_archivo="df_fese.rds"):
@@ -122,11 +137,24 @@ def obtener_insumos(path_insumos="insumos"):
 
 
 def leer_insumos(fese, insumos):
-    # Creamos una lista de validaciones que no pasaron. En caso de haber alguna validación fallida se agrega como diccionario a esta lista
     validaciones = []
-
     resultados = []
-    # Iteramos sobre cada archivo insumo
+
+    print("Preparando catálogos históricos...")
+    inicio_catalogos = perf_counter()
+
+    codigos = set(fese["codigo"].unique())
+    centros_historicos = set(fese["centro"].dropna().unique())
+    codigo_incidente = fese.groupby("codigo")["incidente"].agg(lambda x: x.unique()[0]).to_dict()
+
+    estado_region_grupos = fese.groupby("region")["estado"].agg(lambda x: list(x.unique())).to_dict()
+    estado_a_region = {estado: region for region, estados in estado_region_grupos.items() for estado in estados}
+
+    codigo_tipo_grupos = fese.groupby("tipo")["codigo"].agg(lambda x: list(x.unique())).to_dict()
+    codigo_a_tipo = {codigo: tipo for tipo, codigos_tipo in codigo_tipo_grupos.items() for codigo in codigos_tipo}
+
+    print(f"⏱ Catálogos preparados en {perf_counter() - inicio_catalogos:.1f} s")
+
     for insumo in insumos:
         # Abrimos el archivo excel como un archivo (NO UN DATAFRAME) para leer metadatos sobre las hojas
         with pd.ExcelFile(insumo) as xlsx:
@@ -135,27 +163,38 @@ def leer_insumos(fese, insumos):
                 hoja for hoja in xlsx.sheet_names if hoja.startswith("C")
             ]
             # Iteramos sobre las hojas
-            for hoja in hojas_con_datos:
-                # Conseguimos el nombre del centro que se encuentra en la celda D18
-                workbook = openpyxl.load_workbook(insumo, data_only=True)
-                hoja_centro = workbook[hoja]
-                # Agarra el nombre de centro y de entidad de las celdas hardcodeadas
-                nombre_centro = hoja_centro["D18"].value.strip()
-                nombre_entidad = hoja_centro["D12"].value
-                # Si el nombre de entidad está vacío entonces intenta en otras celdas
-                if nombre_entidad is None:
-                    nombre_entidad = workbook["RESUMEN"]["C10"].value
-                if nombre_entidad is None:
-                    nombre_entidad = workbook["RESUMEN"]["C11"].value
-                nombre_entidad = nombre_entidad.strip()
-                print(f"Trabajando: {nombre_entidad}, {nombre_centro}, hoja={hoja}, archivo={insumo}")
-                workbook.close()
-                # Cargamos la hoja en un dataframe usando las columnas y filas correctas
-                datos_centro = pd.read_excel(
-                    xlsx, sheet_name=hoja, usecols="B:D", skiprows=18
-                )
-                # Lista de código históricos
-                codigos = fese["codigo"].unique()
+            for insumo in insumos:
+                inicio_archivo = perf_counter()
+                print(f"\nAbriendo archivo: {insumo.name}")
+
+                with pd.ExcelFile(insumo) as xlsx:
+                    hojas_con_datos = [hoja for hoja in xlsx.sheet_names if hoja.startswith("C")]
+                    datos_hojas = pd.read_excel(xlsx, sheet_name=hojas_con_datos, usecols="B:D", skiprows=18)
+                    workbook = openpyxl.load_workbook(insumo, data_only=True, read_only=True)
+
+                    try:
+                        resumen_c10 = workbook["RESUMEN"]["C10"].value
+                        resumen_c11 = workbook["RESUMEN"]["C11"].value
+
+                        for hoja in hojas_con_datos:
+                            hoja_centro = workbook[hoja]
+                            nombre_centro = hoja_centro["D18"].value.strip()
+                            nombre_entidad = hoja_centro["D12"].value
+
+                            if nombre_entidad is None:
+                                nombre_entidad = resumen_c10
+                            if nombre_entidad is None:
+                                nombre_entidad = resumen_c11
+
+                            nombre_entidad = nombre_entidad.strip()
+                            print(f"Trabajando: {nombre_entidad}, {nombre_centro}, hoja={hoja}, archivo={insumo}")
+                            datos_centro = datos_hojas[hoja].copy()
+                    finally:
+                        workbook.close()
+
+                print(f"⏱ Archivo terminado en {perf_counter() - inicio_archivo:.1f} s: {insumo.name}")
+
+
                 # Renombramos la columna Cantidad por total y la columna ID por codigo
                 datos_centro.rename(
                     columns={
@@ -171,7 +210,7 @@ def leer_insumos(fese, insumos):
 
                 # Quitamos todas las filas que no correspondan a un código existente
                 # Esto se debe a que a veces ponen filas de "Total"
-                datos_centro = datos_centro.drop(datos_centro[~datos_centro["codigo"].isin(codigos)].index)
+                datos_centro = datos_centro[datos_centro["codigo"].isin(codigos)].copy()
                 # Agregamos columna con el nombre del centro y con el nombre de la entidad federativa
                 datos_centro = datos_centro.assign(
                     estado=nombre_entidad.strip(),
@@ -204,40 +243,21 @@ def leer_insumos(fese, insumos):
                 datos_centro.loc[
                     ~(datos_centro["codigo"].isin(codigos_improcedentes)), "procedencia"
                 ] = "Procedentes"
-                datos_centro["region"] = ""
-                datos_centro["tipo"] = ""
+
                 datos_centro.estado = (
                     datos_centro.estado.str.title().replace(mapa_estados).str.upper()
                 )
-                # Mapeamos los incidentes según su código. Esto se debe a que los incidentes están diferentes en el reporte y en los insumos.
-                codigo_incidente = (
-                    fese.groupby("codigo")["incidente"]
-                    .agg(lambda x: list(x.unique())[0])
-                    .to_dict()
-                )
-                datos_centro.incidente = datos_centro.codigo.replace(codigo_incidente)
-                # Mapeamos los estados según su región
-                estado_region = (
-                    fese.groupby("region")["estado"]
-                    .agg(lambda x: list(x.unique()))
-                    .to_dict()
-                )
-                for key, value in estado_region.items():
-                    datos_centro.loc[datos_centro["estado"].isin(value), "region"] = key
-                # Asignamos los tipo según el código
-                codigo_tipo = (
-                    fese.groupby("tipo")["codigo"]
-                    .agg(lambda x: list(x.unique()))
-                    .to_dict()
-                )
-                for key, value in codigo_tipo.items():
-                    datos_centro.loc[datos_centro["codigo"].isin(value), "tipo"] = key
-                #
-                # Obtenemos un dataframe sólo con las columnas útiles y en el orden correcto
+
+                datos_centro["incidente"] = datos_centro["codigo"].map(codigo_incidente)
+                datos_centro["region"] = datos_centro["estado"].map(estado_a_region).fillna("")
+                datos_centro["tipo"] = datos_centro["codigo"].map(codigo_a_tipo).fillna("")
+                
+
+
                 datos_centro = datos_centro[columnas_long]
 
                 # Hacemos las validaciones y agregamos los errores a la lista de validaciones
-                if nombre_centro not in fese["centro"].unique():
+                if nombre_centro not in centros_historicos:
                     # Si el centro no existe en el reporte anual entonces agrega un error
                     validaciones.append(
                         {
@@ -434,8 +454,7 @@ def generar_formato_cniedt(salida):
 
 def generar_salidas(fese, columnas_long, resultados, validaciones):
     resultados = [fese[columnas_long]] + resultados
-
-    salida = pd.concat(resultados)
+    salida = pd.concat(resultados, ignore_index=True)
 
     mapeo_centro = {
         "Izucar De Matamoros": "Izúcar De Matamoros",
