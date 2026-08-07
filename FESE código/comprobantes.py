@@ -69,7 +69,7 @@ def nombre_seguro(valor):
     return re.sub(r"[^A-Z0-9]+", " ", sin_acentos(valor).upper()).strip()
 
 
-def crear_pdf(entidad, actuales, anteriores, fecha_periodo, fecha_anterior, plantilla, archivo_salida, observaciones="Sin observaciones.", intentos=1):
+def crear_pdf(entidad, actuales, anteriores, fecha_periodo, fecha_anterior, plantilla, archivo_salida, observaciones="Sin observaciones."):
     archivo_salida = Path(archivo_salida)
     temporal = archivo_salida.with_name(f"~TEMP_{archivo_salida.name}")
     pdf = canvas.Canvas(str(temporal), pagesize=letter)
@@ -126,14 +126,15 @@ def crear_pdf(entidad, actuales, anteriores, fecha_periodo, fecha_anterior, plan
     pdf.setLineWidth(0.55)
     pdf.line(72, y_tabla - 3, 528, y_tabla - 3)
 
+    estilo_metodologia = ParagraphStyle("metodologia", fontName="Times-Roman", fontSize=9.5, leading=11.5, textColor=colors.black)
+    nota_metodologica = Paragraph("<b>Nota metodológica:</b> Las variaciones porcentuales iguales o superiores al 10% en valor absoluto se resaltan en color azul para facilitar la identificación de los cambios más significativos respecto del mes anterior.", estilo_metodologia)
+    _, alto_metodologia = nota_metodologica.wrap(468, 45)
+    nota_metodologica.drawOn(pdf, 72, y_tabla - 24 - alto_metodologia)
+
     estilo_nota = ParagraphStyle("nota", fontName="Times-Roman", fontSize=11.5, leading=14)
     nota = Paragraph(f"<b>Observaciones:</b> {observaciones}", estilo_nota)
     nota.wrapOn(pdf, 468, 50)
     nota.drawOn(pdf, 72, 214)
-
-    intentos_pdf = Paragraph(f"<b># de intentos en la entrega:</b> {int(intentos)}", estilo_nota)
-    intentos_pdf.wrapOn(pdf, 468, 50)
-    intentos_pdf.drawOn(pdf, 72, 98)
 
     pdf.setFont("Times-Roman", 10.5)
     pdf.drawCentredString(ancho / 2, 28, "1")
