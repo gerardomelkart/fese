@@ -1,5 +1,8 @@
 pandas
+numpy
 openpyxl
 pyreadr
 unidecode
 pywin32
+pypdf
+reportlab

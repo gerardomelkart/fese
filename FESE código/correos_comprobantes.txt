@@ -1,2 +1,33 @@
 Entidad;Correo
-Coahuila;gerardo.noeller@sspc.gob.mx
+Veracruz;fese@c4ver.gob.mx
+Quintana Roo;carmentorrez10@gmail.com
+Tamaulipas;estadistica.informacionc5@tamaulipas.gob.mx
+Guanajuato;estadisticac5i@guanajuato.gob.mx
+Puebla;staff.c5i@complejopuebla.gob.mx
+Aguascalientes;olivia.poncedeleon@aguascalientes.gob.mx
+Mexico;sergio.malvaez@ssedomex.gob.mx
+Baja Californa Sur;c4lapazbcs2023@gmail.com
+Oaxaca;misael.lucas@sspo.gob.mx
+Morelos;direcciongeneralc5@morelos.gob.mx
+CDMX;galvaradom@c5.cdmx.gob.mx
+Yucatan;walterd.contreras@yucatan.gob.mx
+Colima;direccion.c5i@secretariadoejecutivo.col.gob.mx
+Sonora;ocarrizosa@911sonora.gob.mx
+Chuhuahua;silma.briones@chihuahua.gob.mx
+Tabasco;emsanchezb@c4tabasco.gob.mx
+Nuevo Leon;911@nuevoleon.gob.mx
+Baja California;alfredo.gallardo@911bc.gob.mx
+Tlaxcala;analisisc4@sesesptlax.gob.mx
+Jalisco;yocampo@c5jalisco.gob.mx
+Coahulia;juansergio.flores@coahuila.gob.mx
+Sinaloa;usec@sinaloa.gob.mx
+Hidalgo;silvia.vazquez@hidalgo.gob.mx
+Nayarit;co.c5@nayarit.gob.mx
+Michoacan;jferreira@michoacan.gob.mx
+Guerrero;23chilpancingo911@gmail.com
+Campeche;jorge.capitan@c4campeche.gob.mx
+Zacatecas;calidad_c5@zacatecas.gob.mx
+San Luis Potosi;desarrolloc4@sspslp.gob.mx
+Chiapas;jmendoza.sistemas@gmail.com
+Durango;estadistica.vinculacion.c5@gmail.com
+Queretaro;bsanchez@cias.gob.mx

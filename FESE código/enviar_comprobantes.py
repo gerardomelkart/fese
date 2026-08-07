@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
 ARCHIVO_CORREOS = BASE_DIR / "correos_comprobantes.txt"
 CUENTA_REMITENTE = "admin.bnext.cni@sspc.gob.mx"
-MODO = "BORRADOR"  # BORRADOR o ENVIAR
+MODO = "ENVIAR"  # BORRADOR o ENVIAR
 
 fecha_periodo = dt.date.today().replace(day=1) - dt.timedelta(days=1)
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
