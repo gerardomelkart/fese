@@ -69,8 +69,7 @@ def leer_destinatarios():
 
 
 def indexar_comprobantes():
-    if not CARPETA_COMPROBANTES.is_dir():
-        raise FileNotFoundError(f"No existe la carpeta de comprobantes: {CARPETA_COMPROBANTES}")
+    CARPETA_COMPROBANTES.mkdir(parents=True, exist_ok=True)
 
     prefijo = f"COMPROBANTE FESE {NOMBRE_MES.upper()} {ANIO} - "
     comprobantes = {}
