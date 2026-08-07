@@ -15,12 +15,14 @@ import numpy as np
 import pyreadr
 from unidecode import unidecode
 from time import perf_counter
+from comprobantes import generar_comprobantes
 
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_INSUMOS = BASE_DIR / "insumos"
 CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
 CARPETA_PLANTILLAS = BASE_DIR / "plantillas"
 PLANTILLA_CNIEDT = CARPETA_PLANTILLAS / "Formato CNIEDT plantilla.xlsx"
+PLANTILLA_COMPROBANTE = CARPETA_PLANTILLAS / "COMPROBANTE FESE plantilla.pdf"
 CARPETA_CACHE = Path(os.getenv("LOCALAPPDATA", str(BASE_DIR))) / "FESE" / "cache"
 
 # REVISAR BIEN PUEBLA Y SINALOA que cuadren el total con loq eu mandan en el excel
@@ -512,6 +514,7 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
 
     try:
         archivo_cniedt = generar_formato_cniedt(salida)
+        generar_comprobantes(salida, CARPETA_DESTINO, PLANTILLA_COMPROBANTE, fecha_mes_pasado, fecha_mes_anterior)
         del salida
 
         proceso_rds, temporal_rds, inicio_rds = iniciar_escritura_rds_paralela(archivo_pickle, archivo_rds)
