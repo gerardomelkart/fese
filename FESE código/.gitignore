@@ -26,3 +26,6 @@ __pycache__/
 ~TEMP_*
 *_Error.txt
 ___All_Errors.txt
+
+# Comprobantes pendientes generados manualmente
+comprobantes_pendientes/
