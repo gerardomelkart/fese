@@ -1,9 +1,19 @@
-# Datos pesados
+# Insumos mensuales
+insumos/*
+!insumos/.gitkeep
+
+# Históricos
+datos/*
+!datos/.gitkeep
 *.rds
 *.rds.bak*
 fese.csv
+fese.xlsx
+*.bak
 
 # Salidas generadas
+salidas/*
+!salidas/.gitkeep
 Rep_anual*.xlsx
 validaciones.json
 
@@ -11,5 +21,8 @@ validaciones.json
 __pycache__/
 *.pyc
 
-# Temporales de Excel
+# Temporales
 ~$*
+~TEMP_*
+*_Error.txt
+___All_Errors.txt

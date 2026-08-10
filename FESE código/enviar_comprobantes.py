@@ -9,7 +9,7 @@ import win32com.client as win32
 
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
-ARCHIVO_CORREOS = BASE_DIR / "correos_comprobantes.txt"
+ARCHIVO_CORREOS = BASE_DIR / "config" / "correos_comprobantes.txt"
 CUENTA_REMITENTE = "admin.bnext.cni@sspc.gob.mx"
 MODO = "ENVIAR"  # BORRADOR o ENVIAR
 

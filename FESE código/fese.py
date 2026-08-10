@@ -15,15 +15,20 @@ import numpy as np
 import pyreadr
 from unidecode import unidecode
 from time import perf_counter
-from comprobantes import generar_comprobantes
+from modulos.comprobantes import generar_comprobantes
 
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_INSUMOS = BASE_DIR / "insumos"
+CARPETA_DATOS = BASE_DIR / "datos"
+CARPETA_SALIDAS = BASE_DIR / "salidas"
 CARPETA_DESTINO = Path(r"C:\Users\gerardo.noeller\OneDrive - Secretaría de Seguridad y Protección Ciudadana\Escritorio\FESE")
 CARPETA_PLANTILLAS = BASE_DIR / "plantillas"
 PLANTILLA_CNIEDT = CARPETA_PLANTILLAS / "Formato CNIEDT plantilla.xlsx"
 PLANTILLA_COMPROBANTE = CARPETA_PLANTILLAS / "COMPROBANTE FESE plantilla.pdf"
 CARPETA_CACHE = Path(os.getenv("LOCALAPPDATA", str(BASE_DIR))) / "FESE" / "cache"
+
+for carpeta in (CARPETA_INSUMOS, CARPETA_DATOS, CARPETA_SALIDAS):
+    carpeta.mkdir(parents=True, exist_ok=True)
 
 # REVISAR BIEN PUEBLA Y SINALOA que cuadren el total con loq eu mandan en el excel
 # Hacer validación de que sean todos números enteros
@@ -94,7 +99,7 @@ def proceso_fese():
     inicio_total = perf_counter()
 
     inicio = perf_counter()
-    fese = cargar_y_limpiar(BASE_DIR / f"fese{anio_mes_anterior}-{mes_anterior}.rds")
+    fese = cargar_y_limpiar(CARPETA_DATOS / f"fese{anio_mes_anterior}-{mes_anterior}.rds")
     print(f"⏱ Histórico cargado en {perf_counter() - inicio:.1f} s")
 
     insumos = obtener_insumos(CARPETA_INSUMOS)
@@ -501,13 +506,13 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
         wide[mes] = wide[mes].fillna(0)
 
     wide = wide.sort_values(by=["Año", "Código"], ascending=[True, True])
-    archivo_excel = BASE_DIR / f"Rep_anual{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
+    archivo_excel = CARPETA_SALIDAS / f"Rep_anual{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
 
     salida.estado = salida.estado.str.title()
     salida.estado = salida.estado.apply(unidecode)
     salida.estado = salida.estado.replace(mapa_estados)
 
-    archivo_rds = BASE_DIR / f"fese{anio_mes_pasado}-{mes_pasado}.rds"
+    archivo_rds = CARPETA_DATOS / f"fese{anio_mes_pasado}-{mes_pasado}.rds"
     archivo_pickle = preparar_fuente_rds(salida, archivo_rds)
     proceso_rds = None
     temporal_rds = None
@@ -523,7 +528,7 @@ def generar_salidas(fese, columnas_long, resultados, validaciones):
         wide.to_excel(archivo_excel, index=False)
         print(f"⏱ Escritura Excel anual: {perf_counter() - inicio:.1f} s")
 
-        with open(BASE_DIR / "validaciones.json", "w") as f:
+        with open(CARPETA_SALIDAS / "validaciones.json", "w") as f:
             json.dump(validaciones, f)
 
         finalizar_escritura_rds_paralela(proceso_rds, temporal_rds, archivo_rds, inicio_rds)
@@ -597,8 +602,14 @@ def copiar_resultados_y_limpiar(archivo_excel, archivo_rds, archivo_cniedt):
     patron_rds = re.compile(r"^fese(\d{4})-(\d{1,2})\.rds$", re.IGNORECASE)
     patron_excel = re.compile(r"^Rep_anual(\d{4})-(\d{1,2})\.xlsx$", re.IGNORECASE)
 
-    for archivo in BASE_DIR.iterdir():
-        coincidencia = patron_rds.match(archivo.name) or patron_excel.match(archivo.name)
+    for archivo in CARPETA_DATOS.glob("fese*.rds"):
+        coincidencia = patron_rds.match(archivo.name)
+        if coincidencia and (int(coincidencia.group(1)), int(coincidencia.group(2))) not in meses_conservar:
+            archivo.unlink()
+            print(f"Histórico antiguo eliminado: {archivo.name}")
+
+    for archivo in CARPETA_SALIDAS.glob("Rep_anual*.xlsx"):
+        coincidencia = patron_excel.match(archivo.name)
         if coincidencia and (int(coincidencia.group(1)), int(coincidencia.group(2))) not in meses_conservar:
             archivo.unlink()
             print(f"Resultado antiguo eliminado: {archivo.name}")
