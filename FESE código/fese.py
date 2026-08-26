@@ -325,6 +325,113 @@ def generar_formato_cniedt(salida):
         raise FileNotFoundError(f"No existe la plantilla CNIEDT: {PLANTILLA_CNIEDT}")
 
     datos = salida[(salida["ao"] == anio_mes_pasado) & (salida["mes"] == mes_pasado) & (salida["procedencia"] == "Procedentes")].copy()
+
+    if datos.empty:
+        raise ValueError(f"No hay datos procedentes para {nombre_mes_pasado} {anio_mes_pasado}.")
+
+    datos["clave_entidad"] = datos["estado"].apply(normalizar_clave_entidad)
+    totales = datos.groupby("clave_entidad")["total"].sum().to_dict()
+
+    archivo_salida = CARPETA_DESTINO / f"Formato CNIEDT {anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
+    archivo_temporal = CARPETA_DESTINO / f"~CNIEDT_TEMP_{anio_mes_pasado}-{str(mes_pasado).zfill(2)}.xlsx"
+
+    if archivo_temporal.exists():
+        archivo_temporal.unlink()
+
+    shutil.copy2(PLANTILLA_CNIEDT, archivo_temporal)
+
+    excel = None
+    libro = None
+
+    try:
+        excel = win32.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        libro = excel.Workbooks.Open(str(archivo_temporal))
+
+        try:
+            hoja = libro.Worksheets("Llamadas 911")
+        except Exception as e:
+            raise ValueError("No se encontró la pestaña 'Llamadas 911' en el formato CNIEDT.") from e
+
+        columna_mes = None
+
+        for columna in range(2, 14):
+            encabezado = str(hoja.Cells(2, columna).Value or "").strip().lower()
+
+            if encabezado == nombre_mes_pasado.lower():
+                columna_mes = columna
+                break
+
+        if columna_mes is None:
+            raise ValueError(f"No se encontró la columna del mes '{nombre_mes_pasado}' en la pestaña 'Llamadas 911'.")
+
+        filas_objetivo = []
+        entidades_formato = set()
+
+        for fila in range(3, 35):
+            entidad = hoja.Cells(fila, 1).Value
+
+            if entidad is None:
+                raise ValueError(f"La fila {fila} de 'Llamadas 911' no contiene una entidad.")
+
+            clave = normalizar_clave_entidad(entidad)
+            filas_objetivo.append((fila, clave, str(entidad).strip()))
+            entidades_formato.add(clave)
+
+        if len(filas_objetivo) != 32:
+            raise ValueError(f"Se esperaban 32 entidades en 'Llamadas 911', pero se encontraron {len(filas_objetivo)}.")
+
+        faltantes = entidades_formato - set(totales.keys())
+        extras = set(totales.keys()) - entidades_formato
+
+        if faltantes:
+            raise ValueError(f"Faltan entidades en los datos FESE: {sorted(faltantes)}")
+
+        if extras:
+            raise ValueError(f"Hay entidades FESE que no coinciden con el formato CNIEDT: {sorted(extras)}")
+
+        for fila, clave, entidad in filas_objetivo:
+            hoja.Cells(fila, columna_mes).Value = float(totales[clave])
+
+        excel.CalculateFull()
+
+        total_fese = float(sum(totales.values()))
+        total_formato = hoja.Cells(35, columna_mes).Value
+
+        try:
+            total_formato = float(total_formato)
+        except (TypeError, ValueError):
+            raise ValueError(f"El total calculado en la fila 35 para {nombre_mes_pasado} no es numérico: {total_formato}")
+
+        if abs(total_formato - total_fese) > 0.01:
+            raise ValueError(f"El total del formato CNIEDT ({total_formato:,.0f}) no coincide con el total FESE ({total_fese:,.0f}).")
+
+        libro.Save()
+
+    finally:
+        if libro is not None:
+            libro.Close(SaveChanges=True)
+
+        if excel is not None:
+            excel.Quit()
+
+    try:
+        os.replace(archivo_temporal, archivo_salida)
+    except PermissionError as e:
+        raise PermissionError(f"No se pudo reemplazar el CNIEDT porque el archivo destino probablemente está abierto o bloqueado: {archivo_salida}") from e
+
+    print(f"✅ CNIEDT actualizado: {nombre_mes_pasado} {anio_mes_pasado} = {total_fese:,.0f}")
+    print(f"⏱ Generación CNIEDT: {perf_counter() - inicio_cniedt:.1f} s")
+
+    return archivo_salida
+    inicio_cniedt = perf_counter()
+
+    if not PLANTILLA_CNIEDT.is_file():
+        raise FileNotFoundError(f"No existe la plantilla CNIEDT: {PLANTILLA_CNIEDT}")
+
+    datos = salida[(salida["ao"] == anio_mes_pasado) & (salida["mes"] == mes_pasado) & (salida["procedencia"] == "Procedentes")].copy()
     if datos.empty:
         raise ValueError(f"No hay datos procedentes para {nombre_mes_pasado} {anio_mes_pasado}.")
 
