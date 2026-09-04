@@ -390,7 +390,7 @@ def generar_formato_cniedt(salida):
             raise ValueError(f"Faltan entidades en los datos FESE: {sorted(faltantes)}")
 
         if extras:
-            raise ValueError(f"Hay entidades FESE que no coinciden con el formato CNIEDT: {sorted(extras)}")
+            raise ValueError(f"Hay entidades FESE que no coinciden conn el formato CNIEDT: {sorted(extras)}")
 
         for fila, clave, entidad in filas_objetivo:
             hoja.Cells(fila, columna_mes).Value = float(totales[clave])
